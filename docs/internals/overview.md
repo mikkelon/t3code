@@ -3,7 +3,7 @@
 T3 Code keeps execution in the environment that owns the workspace. Web, desktop, and mobile
 clients control it over authenticated RPC. A remote client must never substitute its own filesystem,
 provider credentials, or machine state for the environment's. The desktop app bundles a server,
-but its renderer follows the same boundary.
+or adopts the background service that owns its T3 home, but its renderer follows the same boundary.
 
 ## Ownership boundaries
 
