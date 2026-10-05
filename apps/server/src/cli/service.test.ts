@@ -100,10 +100,15 @@ const newerServiceStatus = { ...status, current: false, installedVersion: "999.0
 function makeTestService(serviceStatus: BootService.BootServiceStatus) {
   const installOptions: Array<Parameters<BootService.BootService["Service"]["install"]>[0]> = [];
   const restarts: Array<true> = [];
+  const starts: Array<true> = [];
   const service = BootService.BootService.of({
     status: Effect.succeed(serviceStatus),
     restart: Effect.sync(() => {
       restarts.push(true);
+      return serviceStatus.installed;
+    }),
+    start: Effect.sync(() => {
+      starts.push(true);
       return serviceStatus.installed;
     }),
     install: (options) =>
@@ -118,7 +123,7 @@ function makeTestService(serviceStatus: BootService.BootServiceStatus) {
       }),
     uninstall: Effect.succeed(false),
   });
-  return { service, installOptions, restarts };
+  return { service, installOptions, restarts, starts };
 }
 
 it.layer(Layer.mergeAll(NodeServices.layer, NetService.layer))("service commands", (it) => {
@@ -142,6 +147,56 @@ it.layer(Layer.mergeAll(NodeServices.layer, NetService.layer))("service commands
 
       expect(restarts).toEqual([true]);
       expect(installOptions).toEqual([]);
+    }),
+  );
+
+  it.effect("start starts the installed service without restarting it", () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const baseDir = yield* fs.makeTempDirectoryScoped({ prefix: "t3-service-cli-test-" });
+      const { service, restarts, starts } = makeTestService(status);
+      vi.spyOn(BootService, "layer").mockReturnValue(
+        Layer.succeed(BootService.BootService, service),
+      );
+
+      yield* Command.runWith(serviceCommand, { version: packageJson.version })([
+        "start",
+        "--base-dir",
+        baseDir,
+      ]).pipe(
+        Effect.provideService(HostProcessEnvironment, {}),
+        Effect.provide(ConfigProvider.layer(ConfigProvider.fromEnv({ env: {} }))),
+      );
+
+      expect(starts).toEqual([true]);
+      expect(restarts).toEqual([]);
+    }),
+  );
+
+  it.effect("install --no-start prepares the service without starting it", () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const baseDir = yield* fs.makeTempDirectoryScoped({ prefix: "t3-service-cli-test-" });
+      const { service, installOptions } = makeTestService({
+        ...status,
+        installed: false,
+        current: false,
+      });
+      vi.spyOn(BootService, "layer").mockReturnValue(
+        Layer.succeed(BootService.BootService, service),
+      );
+
+      yield* Command.runWith(serviceCommand, { version: packageJson.version })([
+        "install",
+        "--base-dir",
+        baseDir,
+        "--no-start",
+      ]).pipe(
+        Effect.provideService(HostProcessEnvironment, {}),
+        Effect.provide(ConfigProvider.layer(ConfigProvider.fromEnv({ env: {} }))),
+      );
+
+      expect(installOptions).toEqual([{ allowDowngrade: false, start: false }]);
     }),
   );
 
