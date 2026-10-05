@@ -4,6 +4,13 @@ import * as NodePath from "node:path";
 import * as NodeSqlite from "node:sqlite";
 
 import { SERVER_EXIT_CODE_STATE_DIR_OWNED } from "@t3tools/contracts";
+import {
+  BOOT_SERVICE_LAUNCHD_LABEL,
+  BOOT_SERVICE_PLIST_FILE,
+  BOOT_SERVICE_UNIT_FILE,
+  bootServiceBaseDirOf,
+} from "@t3tools/shared/bootServiceUnit";
+import { CLI_RELEASES_PAGE_URL } from "@t3tools/shared/cliRelease";
 import * as HostProcess from "@t3tools/shared/HostProcess";
 import * as Crypto from "effect/Crypto";
 import * as Duration from "effect/Duration";
@@ -13,12 +20,6 @@ import * as Option from "effect/Option";
 import * as Runtime from "effect/Runtime";
 import * as Schema from "effect/Schema";
 
-import {
-  BOOT_SERVICE_LAUNCHD_LABEL,
-  BOOT_SERVICE_PLIST_FILE,
-  BOOT_SERVICE_UNIT_FILE,
-  bootServiceBaseDirOf,
-} from "./cloud/bootService.ts";
 import { ServiceLauncherHostProcess } from "./cloud/serviceLauncherClient.ts";
 import {
   SERVICE_LAUNCHER_CONTEXT_ENV,
@@ -56,7 +57,7 @@ export class OlderBootServiceError extends Schema.TaggedError<OlderBootServiceEr
   override readonly [Runtime.errorExitCode] = SERVER_EXIT_CODE_STATE_DIR_OWNED;
 
   override get message(): string {
-    return `A T3 Code background service set up for ${this.baseDir} may still run a release without the ownership lock. On that machine, try \`t3 update\` and let it restart (or run \`t3 service restart\` if the update is already installed). If the older launcher cannot update, run \`t3 service uninstall\`, then reinstall with \`t3 service install\` from a current CLI. You can also leave the service uninstalled. Pass \`--base-dir ${this.baseDir}\` to each command, and use \`npx t3@latest\` if \`t3\` is not installed or is outdated. Then retry. No server was stopped.`;
+    return `A T3 Code background service set up for ${this.baseDir} may still run a release without the ownership lock. On that machine, try \`t3 update\` and let it restart (or run \`t3 service restart\` if the update is already installed). If the older launcher cannot update, run \`t3 service uninstall\`, then reinstall with \`t3 service install\` from a current CLI. You can also leave the service uninstalled. Pass \`--base-dir ${this.baseDir}\` to each command, and install a current \`t3\` from ${CLI_RELEASES_PAGE_URL} if it is missing or outdated. Then retry. No server was stopped.`;
   }
 }
 
