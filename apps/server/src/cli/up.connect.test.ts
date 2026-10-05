@@ -86,6 +86,8 @@ it.layer(Layer.mergeAll(NodeServices.layer, NetService.layer))("t3 up with T3 Co
           BootService.BootService.of({
             status: Effect.succeed(status),
             withStopped: (operation) => operation,
+            stage: () => Effect.die("t3 up does not stage a runtime"),
+            start: Effect.die("t3 up does not start the service on its own"),
             restart: Effect.sync(() => events.push("restart")).pipe(
               Effect.andThen(
                 Effect.fail(new BootService.BootServiceCommandError({ step: "restart" })),
