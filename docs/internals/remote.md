@@ -85,9 +85,26 @@ describes the server. Process replacement belongs to the launcher's
 [update protocol](./server-updates.md); the connection runtime handles the
 resulting disconnect.
 
+### Desktop and the background service
+
+One T3 home has one server. Two servers on one database contend for SQLite, replay each other's
+events into their own provider reactors (duplicate agent processes for one thread), and fight over
+runtime state and tunnels. So before choosing a port, the desktop app decides who owns its home
+([discovery](../../apps/desktop/src/backend/DesktopLocalServerDiscovery.ts)): a server whose
+`server-runtime.json` names a live pid and whose origin answers with the home's `environment-id` is
+adopted; an installed service unit for that home is started and adopted; only otherwise does the app
+embed a backend. Failure to start or sign in never falls back to embedding. The runtime file alone is
+not trusted because a dead server's file can point at a port another home's server now uses. The app
+authenticates the way `t3` does for the same OS user: a CLI of the server's exact version (bundled,
+or the service's pinned runtime) issues an administrative session, because every CLI that opens the
+database runs migrations. An adopted server is never stopped or cleaned up by the app, and a server
+only clears runtime state that still names its own pid. Settings that relaunch the embedded backend
+do not reach an adopted server; Tailscale HTTPS is therefore a server setting
+(`server.setTailscaleServe`), while launch flags keep owning it for the embedded backend.
+
 ### Desktop without a local environment
 
-Desktop normally launches its own primary server, but the desktop setting `localEnvironmentEnabled`
+Desktop normally launches or adopts its primary server, but the desktop setting `localEnvironmentEnabled`
 (`apps/desktop/src/settings/DesktopAppSettings.ts`) turns that off. Changing it relaunches the app;
 no local state is deleted. On the next start the main process skips port selection, server exposure,
 and the primary and WSL backends, and opens the window right away. The renderer sees this through

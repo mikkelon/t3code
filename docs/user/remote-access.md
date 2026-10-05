@@ -112,7 +112,11 @@ Mobile keeps its manual environment selection.
 ### Tailscale HTTPS
 
 Join both devices to the same tailnet. In the desktop app, enable **Tailscale
-HTTPS** in **Settings → Connections**. Turn it off there to remove that route.
+HTTPS** in **Settings → Connections** and pick the HTTPS port (443, 8443 or
+10000). Turn it off there to remove that route. When the desktop app uses the
+[background service](./background-service.md), or a browser is connected to a
+server you administer, the switch configures that server, which keeps its
+Tailscale URL across restarts.
 
 To start a command-line server with Tailscale HTTPS:
 
@@ -231,6 +235,8 @@ desktop app, open **Settings → Connections** and switch off **Local
 environment**. T3 Code restarts without a local server: no local agents or terminals run, WSL
 backends stay off, and other devices can no longer connect to this computer. Your projects,
 history, and saved connections are kept, and you keep working through pairing, T3 Connect, or SSH.
+If this computer runs the [background service](./background-service.md), the app only stops
+connecting to it; the service keeps running until you uninstall it.
 
 Switch **Local environment** back on in the same place to restart with your previous local
 settings.
