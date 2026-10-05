@@ -1,6 +1,7 @@
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { expect, it } from "@effect/vitest";
 import * as HostProcess from "@t3tools/shared/HostProcess";
+import { posixLauncherScript } from "@t3tools/shared/posixLauncher";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Option from "effect/Option";
@@ -442,5 +443,40 @@ it.layer(NodeServices.layer)("DesktopCliCommand", (it) => {
         .installOnFirstLaunch;
       expect(beside.registry).toMatchObject({ path: "C:\\Tools", writes: 0 });
     }),
+  );
+
+  it.effect.each(["script", "legacy symlink"] as const)(
+    "stays out of the way of the background service's launcher (%s)",
+    (form) =>
+      Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem;
+        const path = yield* Path.Path;
+        const home = yield* fs.makeTempDirectoryScoped();
+        const command = yield* commandIn({ home });
+        const runtime = path.join(home, ".t3", "runtime", "versions", "0.0.47", "t3");
+        yield* fs.makeDirectory(path.dirname(runtime), { recursive: true });
+        yield* fs.writeFileString(runtime, "runtime\n");
+        const link = path.join(home, ".local", "bin", "t3");
+        yield* fs.makeDirectory(path.dirname(link), { recursive: true });
+        if (form === "script") {
+          yield* fs.writeFileString(link, posixLauncherScript(runtime), { mode: 0o755 });
+        } else {
+          yield* fs.symlink(runtime, link);
+        }
+        const before = yield* fs.readFileString(link);
+
+        // The service wrote t3 before the app's first launch got to it.
+        yield* command.installOnFirstLaunch;
+        expect(yield* fs.readFileString(link)).toBe(before);
+        expect(yield* fs.exists(path.join(home, "bin", "t3"))).toBe(false);
+        expect(yield* command.state).toEqual({
+          supported: false,
+          installedPath: null,
+          onPath: false,
+          launcherPath: null,
+        });
+        yield* command.uninstall;
+        expect(yield* fs.readFileString(link)).toBe(before);
+      }).pipe(Effect.scoped),
   );
 });
