@@ -6,9 +6,9 @@ const path = "/api/hooks/scheduled-task%3Ahook/token";
 const endpoint = (url: string | null) => ({ path, url, hasSecret: false });
 
 describe("webhookAddress", () => {
-  it("uses the T3 Connect URL when the server has one", () => {
-    expect(webhookAddress(endpoint("https://relay.t3.codes/v1/hooks/k/t/x"), null)).toEqual({
-      address: "https://relay.t3.codes/v1/hooks/k/t/x",
+  it("uses the server's URL when it has one", () => {
+    expect(webhookAddress(endpoint("https://hooks.example.test/v1/hooks/k/t/x"), null)).toEqual({
+      address: "https://hooks.example.test/v1/hooks/k/t/x",
       copyable: true,
       note: null,
     });
