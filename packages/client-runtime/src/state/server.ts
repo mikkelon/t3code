@@ -1057,6 +1057,15 @@ export function createServerEnvironmentAtoms<R, E>(
       label: "environment-data:provider:install-remove",
       tag: WS_METHODS.providerInstallRemove,
     }),
+    tailscaleServe: createEnvironmentRpcQueryAtomFamily(runtime, {
+      label: "environment-data:server:tailscale-serve",
+      tag: WS_METHODS.serverGetTailscaleServe,
+    }),
+    setTailscaleServe: createEnvironmentRpcCommand(runtime, {
+      label: "environment-data:server:set-tailscale-serve",
+      tag: WS_METHODS.serverSetTailscaleServe,
+      concurrency: { mode: "serial", key: ({ environmentId }) => environmentId },
+    }),
     traceDiagnostics: createEnvironmentRpcQueryAtomFamily(runtime, {
       label: "environment-data:server:trace-diagnostics",
       tag: WS_METHODS.serverGetTraceDiagnostics,
