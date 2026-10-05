@@ -264,9 +264,9 @@ describe("mobile dependency graph", () => {
       // (legacy-plan-mode was pure model logic and moved into state/.)
       ["state", "features", 6, "state must not add imports from features"],
       // lib -> features: lib/runtime.ts is the app composition root and
-      // legitimately wires cloud/observability features; the appearance
+      // legitimately wires the observability feature; the appearance
       // helpers and terminal preferences still need untangling.
-      ["lib", "features", 7, "lib must not add imports from features"],
+      ["lib", "features", 4, "lib must not add imports from features"],
       // components -> features: mostly the appearance preferences provider
       // and the layout toolbar bridges.
       ["components", "features", 33, "components must not add imports from features"],

@@ -5,7 +5,7 @@
  * offline, for example — go through a debug logger instead of `console.warn`
  * so warning output stays reserved for failures someone can act on. Output
  * uses `console.log` with a `[t3-<namespace>]` prefix, matching the existing
- * cloud and terminal debug logs. (client-runtime cannot host this: its
+ * terminal debug log. (client-runtime cannot host this: its
  * tooling bans `console.*` in favor of Effect logging.)
  *
  * A logger is silent in every build, including development, unless enabled.
@@ -15,7 +15,7 @@
  *
  * Subsystems whose traces are useful by default in development (`__DEV__`)
  * opt in with `enabledInDev`; `legacyGlobalFlag` keeps an older
- * subsystem-specific global (e.g. `__T3_CLOUD_DEBUG__`) working.
+ * subsystem-specific global (e.g. `__T3_TERMINAL_DEBUG__`) working.
  */
 
 export interface DebugLogger {
@@ -26,7 +26,7 @@ export interface DebugLogger {
 export interface DebugLoggerOptions {
   /** Log whenever `__DEV__` is true, without the global filter. Defaults to false. */
   readonly enabledInDev?: boolean;
-  /** Name of a legacy subsystem-specific global boolean, e.g. `"__T3_CLOUD_DEBUG__"`. */
+  /** Name of a legacy subsystem-specific global boolean, e.g. `"__T3_TERMINAL_DEBUG__"`. */
   readonly legacyGlobalFlag?: string;
 }
 
