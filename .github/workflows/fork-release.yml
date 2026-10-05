@@ -7,8 +7,9 @@ name: Fork release
 #
 # A release carries:
 # - CLI archives for linux-x64, linux-arm64 and darwin-arm64 plus SHA256SUMS,
-#   which the install scripts, `t3 update`, the background service and SSH
-#   device hosts download (names from packages/shared/src/cliRelease.ts).
+#   which the install scripts, `t3 update`, the background service and
+#   desktop-managed SSH environments download (names from
+#   packages/shared/src/cliRelease.ts).
 # - The Linux desktop app (AppImage and .deb, x64 and arm64) with the
 #   latest-linux*.yml manifests electron-updater follows.
 # There are no Windows builds and no macOS desktop build: without signing
@@ -256,8 +257,9 @@ jobs:
           path: release-cli/*
           if-no-files-found: error
 
-  # The Mac is used as an SSH device host, which downloads the CLI archive of
-  # the connecting client's version. The archive is signed ad hoc.
+  # For servers on Apple Silicon Macs: the install script, `t3 update`, and
+  # desktop-managed SSH environments, which download the archive matching the
+  # client's version. Without a signing identity the archive is signed ad hoc.
   darwin_cli:
     name: macOS arm64 CLI
     needs: [prepare, build_bundle]
