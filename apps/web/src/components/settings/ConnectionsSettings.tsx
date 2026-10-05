@@ -40,6 +40,8 @@ import {
   type DesktopWslState,
   type EnvironmentId,
   resolveEnvironmentMachineKind,
+  TAILSCALE_SERVE_HTTPS_PORTS,
+  type TailscaleServeHttpsPort,
 } from "@t3tools/contracts";
 import {
   connectionRoutes,
@@ -57,7 +59,10 @@ import * as Option from "effect/Option";
 
 import { useCopyToClipboard } from "../../hooks/useCopyToClipboard";
 import { cn } from "../../lib/utils";
-import { isLocalEnvironmentDisabled } from "../../localEnvironment";
+import {
+  isLocalEnvironmentBackgroundService,
+  isLocalEnvironmentDisabled,
+} from "../../localEnvironment";
 import { formatElapsedDurationLabel, formatExpiresInLabel } from "../../timestampFormat";
 import { resolveDesktopPairingUrl } from "./pairingUrls";
 import {
@@ -75,6 +80,7 @@ import {
   SettingsSection,
   useRelativeTimeTick,
 } from "./settingsLayout";
+import { BackgroundServiceSetting } from "./BackgroundServiceSetting";
 import { LocalEnvironmentSetting } from "./LocalEnvironmentSetting";
 import { searchableSetting } from "./settingsSearch";
 import { EnvironmentIconMenu } from "./EnvironmentIconPicker";
@@ -200,6 +206,10 @@ import {
 } from "../../keybindings";
 
 const DEFAULT_TAILSCALE_SERVE_PORT = 443;
+
+function toTailscaleServePort(port: number): TailscaleServeHttpsPort | null {
+  return TAILSCALE_SERVE_HTTPS_PORTS.find((candidate) => candidate === port) ?? null;
+}
 const EMPTY_ADVERTISED_ENDPOINTS: ReadonlyArray<AdvertisedEndpoint> = [];
 const EMPTY_DISCOVERED_SSH_HOSTS: ReadonlyArray<DesktopDiscoveredSshHost> = [];
 
@@ -1691,6 +1701,11 @@ function EmptyRemoteEnvironments() {
 
 export function ConnectionsSettings() {
   const desktopBridge = window.desktopBridge;
+  // An adopted background service is configured on the server itself, like a
+  // browser-hosted one, not through the settings of the app's own backend.
+  const [desktopManagesBackend] = useState(
+    () => desktopBridge !== undefined && !isLocalEnvironmentBackgroundService(),
+  );
   const keybindings = useAtomValue(primaryServerKeybindingsAtom);
   const { environments } = useEnvironments();
   const primaryEnvironment = usePrimaryEnvironment();
@@ -1707,7 +1722,9 @@ export function ConnectionsSettings() {
   const currentSessionScopes = primarySessionState.data?.authenticated
     ? (primarySessionState.data.permissions ?? primarySessionState.data.scopes ?? null)
     : null;
-  const currentAuthPolicy = desktopBridge ? null : (primarySessionState.data?.auth.policy ?? null);
+  const currentAuthPolicy = desktopManagesBackend
+    ? null
+    : (primarySessionState.data?.auth.policy ?? null);
   const savedEnvironments = environments.filter(
     (environment) => environment.entry.target._tag !== "PrimaryConnectionTarget",
   );
@@ -1845,6 +1862,10 @@ export function ConnectionsSettings() {
   const canWriteAccess = useEnvironmentScope(primaryEnvironmentId, AuthAccessWriteScope);
   const canMaintain = useEnvironmentScope(primaryEnvironmentId, AuthEnvironmentMaintainScope);
   const canManageLocalBackend = !isLocalEnvironmentDisabled() && canMaintain;
+  // The app's own backend is maintenance; server.setTailscaleServe needs access:write.
+  const tailscaleServeScope = desktopManagesBackend
+    ? AuthEnvironmentMaintainScope
+    : AuthAccessWriteScope;
   const authAccessChanges = useEnvironmentQuery(
     canReadAccess && primaryEnvironmentId !== null
       ? authEnvironment.accessChanges({
@@ -1854,7 +1875,7 @@ export function ConnectionsSettings() {
       : null,
   );
   const desktopNetworkAccess = useEnvironmentQuery(
-    canManageLocalBackend && desktopBridge ? desktopNetworkAccessStateAtom : null,
+    canManageLocalBackend && desktopManagesBackend ? desktopNetworkAccessStateAtom : null,
   );
   const isSshDiscoveryActive =
     desktopBridge !== undefined && addBackendDialogOpen && savedBackendMode === "ssh";
@@ -1868,8 +1889,19 @@ export function ConnectionsSettings() {
     if (isSshDiscoveryActive) refreshDesktopSshHosts();
   }, [isSshDiscoveryActive, refreshDesktopSshHosts]);
   const desktopWsl = useEnvironmentQuery(
-    canManageLocalBackend && desktopBridge ? desktopWslStateAtom : null,
+    canManageLocalBackend && desktopManagesBackend ? desktopWslStateAtom : null,
   );
+  const serverTailscaleServe = useEnvironmentQuery(
+    canManageLocalBackend &&
+      canWriteAccess &&
+      !desktopManagesBackend &&
+      primaryEnvironmentId !== null
+      ? serverEnvironment.tailscaleServe({ environmentId: primaryEnvironmentId, input: {} })
+      : null,
+  );
+  const setServerTailscaleServe = useAtomCommand(serverEnvironment.setTailscaleServe, {
+    reportFailure: false,
+  });
   const desktopWslState = desktopWsl.data;
   const desktopWslError = desktopWslMutationError ?? desktopWsl.error;
   const isLoadingWslState = desktopWsl.isPending && desktopWsl.data === null;
@@ -1917,16 +1949,27 @@ export function ConnectionsSettings() {
       ),
     );
   })();
-  const isLocalBackendNetworkAccessible = desktopBridge
+  const isLocalBackendNetworkAccessible = desktopManagesBackend
     ? desktopServerExposureState?.mode === "network-accessible"
     : currentAuthPolicy === "remote-reachable";
   const trimmedTailscaleServePortInput = tailscaleServePortInput.trim();
   const parsedTailscaleServePort = Number(trimmedTailscaleServePortInput);
-  const isTailscaleServePortValid =
-    /^\d+$/u.test(trimmedTailscaleServePortInput) &&
-    Number.isInteger(parsedTailscaleServePort) &&
-    parsedTailscaleServePort >= 1 &&
-    parsedTailscaleServePort <= 65_535;
+  const validTailscaleServePort = /^\d+$/u.test(trimmedTailscaleServePortInput)
+    ? toTailscaleServePort(parsedTailscaleServePort)
+    : null;
+  const isTailscaleServePortValid = validTailscaleServePort !== null;
+  const currentTailscaleServePort = desktopManagesBackend
+    ? desktopServerExposureState?.tailscaleServePort
+    : serverTailscaleServe.data?.port;
+  const applyServerTailscaleServe = async (input: {
+    readonly enabled: boolean;
+    readonly port: TailscaleServeHttpsPort;
+  }) => {
+    if (primaryEnvironmentId === null) return;
+    const result = await setServerTailscaleServe({ environmentId: primaryEnvironmentId, input });
+    if (result._tag === "Failure") throw squashAtomCommandFailure(result);
+    serverTailscaleServe.refresh();
+  };
 
   const pendingTailscaleServeBaseUrl = (() => {
     if (!pendingTailscaleServeEndpoint) return null;
@@ -1980,20 +2023,23 @@ export function ConnectionsSettings() {
 
   const handleConfirmTailscaleServeSetup = async () => {
     if (
-      !desktopBridge ||
       primaryEnvironmentId === null ||
-      !readEnvironmentScope(primaryEnvironmentId, AuthEnvironmentMaintainScope)
+      !readEnvironmentScope(primaryEnvironmentId, tailscaleServeScope)
     )
       return;
-    if (!isTailscaleServePortValid) return;
+    if (validTailscaleServePort === null) return;
     setIsUpdatingTailscaleServe(true);
     setDesktopServerExposureMutationError(null);
     const settled = await settlePromise(async () => {
-      await desktopBridge.setTailscaleServeEnabled({
-        enabled: true,
-        port: parsedTailscaleServePort,
-      });
-      refreshDesktopNetworkAccessState();
+      if (desktopManagesBackend && desktopBridge) {
+        await desktopBridge.setTailscaleServeEnabled({
+          enabled: true,
+          port: validTailscaleServePort,
+        });
+        refreshDesktopNetworkAccessState();
+      } else {
+        await applyServerTailscaleServe({ enabled: true, port: validTailscaleServePort });
+      }
       setPendingTailscaleServeEndpoint(null);
     });
     if (settled._tag === "Failure") {
@@ -2013,27 +2059,32 @@ export function ConnectionsSettings() {
   };
 
   const handleStartTailscaleServeSetup = (endpoint: AdvertisedEndpoint) => {
-    setTailscaleServePortInput(
-      String(desktopServerExposureState?.tailscaleServePort ?? DEFAULT_TAILSCALE_SERVE_PORT),
-    );
+    setTailscaleServePortInput(String(currentTailscaleServePort ?? DEFAULT_TAILSCALE_SERVE_PORT));
     setPendingTailscaleServeEndpoint(endpoint);
   };
 
   const handleConfirmTailscaleServeDisable = async () => {
     if (
-      !desktopBridge ||
       primaryEnvironmentId === null ||
-      !readEnvironmentScope(primaryEnvironmentId, AuthEnvironmentMaintainScope)
+      !readEnvironmentScope(primaryEnvironmentId, tailscaleServeScope)
     )
       return;
     setIsUpdatingTailscaleServe(true);
     setDesktopServerExposureMutationError(null);
     const settled = await settlePromise(async () => {
-      await desktopBridge.setTailscaleServeEnabled({
-        enabled: false,
-        port: desktopServerExposureState?.tailscaleServePort ?? DEFAULT_TAILSCALE_SERVE_PORT,
-      });
-      refreshDesktopNetworkAccessState();
+      if (desktopManagesBackend && desktopBridge) {
+        await desktopBridge.setTailscaleServeEnabled({
+          enabled: false,
+          port: currentTailscaleServePort ?? DEFAULT_TAILSCALE_SERVE_PORT,
+        });
+        refreshDesktopNetworkAccessState();
+      } else {
+        await applyServerTailscaleServe({
+          enabled: false,
+          port:
+            toTailscaleServePort(currentTailscaleServePort ?? 0) ?? DEFAULT_TAILSCALE_SERVE_PORT,
+        });
+      }
       setDisableTailscaleServeDialogOpen(false);
     });
     if (settled._tag === "Failure") {
@@ -2370,7 +2421,18 @@ export function ConnectionsSettings() {
   };
 
   const visibleDesktopPairingLinks = desktopPairingLinks;
-  const tailscaleHttpsEndpoint = desktopAdvertisedEndpoints.find(isTailscaleHttpsEndpoint) ?? null;
+  const tailscaleHttpsEndpoint = desktopManagesBackend
+    ? (desktopAdvertisedEndpoints.find(isTailscaleHttpsEndpoint) ?? null)
+    : (serverTailscaleServe.data?.endpoint ?? null);
+  // The app's own backend reports the endpoint it serves; a server reports
+  // its stored setting, which stays on while the endpoint recovers.
+  const isTailscaleServeOn = desktopManagesBackend
+    ? tailscaleHttpsEndpoint?.status === "available"
+    : serverTailscaleServe.data?.enabled === true;
+  const tailscaleServeProblem = desktopManagesBackend
+    ? null
+    : (serverTailscaleServe.data?.problem ?? null);
+  const isTailscaleServeFixed = serverTailscaleServe.data?.source === "launch";
   const visibleDesktopNetworkAdvertisedEndpoints = isLocalBackendNetworkAccessible
     ? desktopAdvertisedEndpoints.filter((endpoint) => !isTailscaleHttpsEndpoint(endpoint))
     : [];
@@ -2894,14 +2956,21 @@ export function ConnectionsSettings() {
         tailscaleHttpsEndpoint
           ? tailscaleHttpsEndpoint.status === "available"
             ? tailscaleHttpsEndpoint.httpBaseUrl
-            : "Use Tailscale Serve to expose this backend through a MagicDNS HTTPS URL."
+            : isTailscaleServeFixed
+              ? "Set by how this computer's server was started."
+              : "Use Tailscale Serve to expose this backend through a MagicDNS HTTPS URL."
           : missingTailscaleEndpointDescription(desktopServerExposureState)
+      }
+      status={
+        tailscaleServeProblem && isTailscaleServeOn ? (
+          <span className="block text-destructive">{tailscaleServeProblem}</span>
+        ) : null
       }
       control={
         tailscaleHttpsEndpoint ? (
           <Switch
-            checked={tailscaleHttpsEndpoint.status === "available"}
-            disabled={isUpdatingTailscaleServe}
+            checked={isTailscaleServeOn}
+            disabled={isUpdatingTailscaleServe || isTailscaleServeFixed}
             onCheckedChange={(checked) => {
               if (checked) {
                 handleStartTailscaleServeSetup(tailscaleHttpsEndpoint);
@@ -2975,17 +3044,16 @@ export function ConnectionsSettings() {
     <SettingsRow
       title={searchableSetting("network-access").title}
       description={
-        desktopBridge
-          ? "This connection cannot view or change network exposure."
-          : currentAuthPolicy === "remote-reachable"
-            ? "Remote access is already configured. Change network exposure where the server starts."
+        currentAuthPolicy === "remote-reachable"
+          ? "Remote access is already configured. Change network exposure where the server starts."
+          : desktopBridge
+            ? "The background service only listens on this computer. Use Tailscale HTTPS to reach it from your other devices."
             : currentAuthPolicy === "loopback-browser"
               ? "Only this machine can connect. Restart with a non-loopback host for remote pairing."
               : "Network exposure information is unavailable."
       }
       control={
-        !desktopBridge &&
-        (currentAuthPolicy === "remote-reachable" || currentAuthPolicy === "loopback-browser") ? (
+        currentAuthPolicy === "remote-reachable" || currentAuthPolicy === "loopback-browser" ? (
           <Tooltip>
             <TooltipTrigger
               render={
@@ -3054,6 +3122,7 @@ export function ConnectionsSettings() {
             }
           >
             <LocalEnvironmentSetting />
+            <BackgroundServiceSetting />
             {canManageLocalBackend ? (
               <SettingsRow
                 title="Version"
@@ -3091,7 +3160,9 @@ export function ConnectionsSettings() {
                       label={
                         primaryServerUpdateState.status === "failed"
                           ? "Retry update"
-                          : `Update to ${primaryVersionMismatch.clientVersion}`
+                          : isLocalEnvironmentBackgroundService()
+                            ? "Update now"
+                            : `Update to ${primaryVersionMismatch.clientVersion}`
                       }
                     />
                   ) : primaryServerUpdateState.status === "idle" && primaryServerConfig ? (
@@ -3100,7 +3171,7 @@ export function ConnectionsSettings() {
                 }
               />
             ) : null}
-            {canManageLocalBackend && desktopBridge ? (
+            {canManageLocalBackend && desktopManagesBackend ? (
               <>
                 {renderNetworkAccessRow()}
                 {renderEndpointRows("endpoint-rail")}
@@ -3108,7 +3179,10 @@ export function ConnectionsSettings() {
                 {renderWslRow()}
               </>
             ) : canManageLocalBackend ? (
-              renderDisabledNetworkAccessRow()
+              <>
+                {renderDisabledNetworkAccessRow()}
+                {canWriteAccess ? renderTailscaleRow() : null}
+              </>
             ) : null}
             {primaryEnvironment ? (
               <details className="group px-3 sm:px-4">
@@ -3339,7 +3413,9 @@ export function ConnectionsSettings() {
               <AlertDialogHeader>
                 <AlertDialogTitle>Disable Tailscale HTTPS?</AlertDialogTitle>
                 <AlertDialogDescription>
-                  T3 Code will restart the local backend without Tailscale Serve.
+                  {desktopManagesBackend
+                    ? "T3 Code will restart the local backend without Tailscale Serve."
+                    : "This computer's server stops answering on its Tailscale HTTPS URL. Devices paired through it disconnect."}
                 </AlertDialogDescription>
               </AlertDialogHeader>
               <AlertDialogFooter>
@@ -3357,10 +3433,12 @@ export function ConnectionsSettings() {
                   {isUpdatingTailscaleServe ? (
                     <>
                       <Spinner size="sm" />
-                      Restarting…
+                      {desktopManagesBackend ? "Restarting…" : "Disabling…"}
                     </>
-                  ) : (
+                  ) : desktopManagesBackend ? (
                     "Restart and disable"
+                  ) : (
+                    "Disable"
                   )}
                 </Button>
               </AlertDialogFooter>
@@ -3377,27 +3455,43 @@ export function ConnectionsSettings() {
               <DialogHeader>
                 <DialogTitle>Set up Tailscale HTTPS?</DialogTitle>
                 <DialogDescription>
-                  T3 Code will restart the local backend with Tailscale Serve enabled and ask
-                  Tailscale to proxy HTTPS traffic to this backend.
+                  {desktopManagesBackend
+                    ? "T3 Code will restart the local backend with Tailscale Serve enabled and ask Tailscale to proxy HTTPS traffic to this backend."
+                    : "This computer's server asks Tailscale to proxy HTTPS traffic to it, and keeps doing so after it restarts."}
                 </DialogDescription>
               </DialogHeader>
               <DialogPanel>
-                <label className="block">
+                <div className="block">
                   <span className="text-sm font-medium text-foreground">HTTPS port</span>
-                  <Input
-                    className="mt-2"
-                    type="number"
-                    inputMode="numeric"
-                    min={1}
-                    max={65_535}
-                    step={1}
-                    value={tailscaleServePortInput}
-                    onChange={(event) => setTailscaleServePortInput(event.target.value)}
-                    disabled={isUpdatingTailscaleServe}
-                  />
-                </label>
+                  <div className="mt-2">
+                    <Select
+                      value={tailscaleServePortInput}
+                      onValueChange={(value) => {
+                        if (typeof value === "string") setTailscaleServePortInput(value);
+                      }}
+                    >
+                      <SelectTrigger
+                        size="sm"
+                        className="w-full"
+                        aria-label="HTTPS port"
+                        disabled={isUpdatingTailscaleServe}
+                      >
+                        <SelectValue>{tailscaleServePortInput}</SelectValue>
+                      </SelectTrigger>
+                      <SelectPopup alignItemWithTrigger={false}>
+                        {TAILSCALE_SERVE_HTTPS_PORTS.map((port) => (
+                          <SelectItem hideIndicator key={port} value={String(port)}>
+                            {port}
+                          </SelectItem>
+                        ))}
+                      </SelectPopup>
+                    </Select>
+                  </div>
+                </div>
                 {!isTailscaleServePortValid ? (
-                  <p className="mt-2 text-xs text-destructive">Enter a port from 1 to 65535.</p>
+                  <p className="mt-2 text-xs text-destructive">
+                    Tailscale Serve offers HTTPS on ports 443, 8443 and 10000.
+                  </p>
                 ) : null}
                 <div className="rounded-md border border-border/70 bg-muted/20 px-3 py-2">
                   <p className="text-xs font-medium text-muted-foreground">HTTPS endpoint</p>
@@ -3429,7 +3523,7 @@ export function ConnectionsSettings() {
                   {isUpdatingTailscaleServe ? (
                     <>
                       <Spinner size="sm" />
-                      Restarting…
+                      {desktopManagesBackend ? "Restarting…" : "Enabling…"}
                     </>
                   ) : (
                     "Enable"
