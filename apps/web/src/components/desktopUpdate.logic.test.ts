@@ -198,9 +198,7 @@ describe("desktop update UI helpers", () => {
   });
 
   it("builds the release history URL", () => {
-    expect(getDesktopUpdateReleaseHistoryUrl()).toBe(
-      "https://github.com/mikkelon/t3code/releases",
-    );
+    expect(getDesktopUpdateReleaseHistoryUrl()).toBe("https://github.com/mikkelon/t3code/releases");
   });
 
   it("toasts only for actionable updater errors", () => {
