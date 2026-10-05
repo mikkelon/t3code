@@ -116,13 +116,24 @@ const serviceReconcileFlags = {
   ),
 };
 
-const serviceInstallCommand = Command.make("install", serviceReconcileFlags).pipe(
+const serviceInstallCommand = Command.make("install", {
+  ...serviceReconcileFlags,
+  noStart: Flag.Boolean("no-start").pipe(
+    Flag.withDescription(
+      "Prepare the runtime and unit without starting the service; `t3 service start` starts it.",
+    ),
+    Flag.withDefault(false),
+  ),
+}).pipe(
   Command.withDescription("Install T3 Code as a background service for this user."),
   Command.withHandler((flags) =>
     runServiceCommand(
       flags,
       Effect.gen(function* () {
-        const result = yield* reconcileService({ allowDowngrade: flags.allowDowngrade });
+        const result = yield* reconcileService({
+          allowDowngrade: flags.allowDowngrade,
+          ...(flags.noStart ? { start: false } : {}),
+        });
         if (!result.changed) {
           yield* Console.log(
             `T3 Code service is already installed with t3@${packageJson.version}.`,
@@ -183,6 +194,22 @@ const serviceRestartCommand = Command.make("restart", projectLocationFlags).pipe
   ),
 );
 
+const serviceStartCommand = Command.make("start", projectLocationFlags).pipe(
+  Command.withDescription("Start the installed background service if it is not running."),
+  Command.withHandler((flags) =>
+    runServiceCommand(
+      flags,
+      Effect.gen(function* () {
+        const service = yield* BootService.BootService;
+        const started = yield* service.start;
+        yield* Console.log(
+          started ? "Started the T3 Code service." : "T3 Code service is not installed.",
+        );
+      }),
+    ),
+  ),
+);
+
 const serviceUninstallCommand = Command.make("uninstall", projectLocationFlags).pipe(
   Command.withDescription("Stop and remove the T3 Code background service."),
   Command.withHandler((flags) =>
@@ -217,6 +244,7 @@ export const serviceCommand = Command.make("service").pipe(
   Command.withSubcommands([
     serviceInstallCommand,
     serviceRestartCommand,
+    serviceStartCommand,
     serviceUninstallCommand,
     serviceStatusCommand,
     serviceUpdateCommand,

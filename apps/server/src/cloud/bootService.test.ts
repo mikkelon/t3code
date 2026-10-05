@@ -587,6 +587,52 @@ it.layer(NodeServices.layer)("boot service install", (it) => {
     }),
   );
 
+  it.effect("start loads and starts a service installed without starting it", () =>
+    Effect.gen(function* () {
+      const { service, commands, makeService, fs } = yield* makeHarness();
+      expect(yield* service.start).toBe(false);
+      yield* service.install({ start: false });
+      expect(commands.some((command) => command.startsWith("systemctl --user restart"))).toBe(
+        false,
+      );
+      commands.length = 0;
+
+      expect(yield* service.start).toBe(true);
+      expect(
+        commands.filter(
+          (command) => command.startsWith("systemctl ") && !command.includes("show-environment"),
+        ),
+      ).toEqual([
+        "systemctl --user daemon-reload",
+        "systemctl --user enable t3code.service",
+        "systemctl --user start t3code.service",
+      ]);
+
+      // Another home's start must not touch this user's unit.
+      commands.length = 0;
+      const path = yield* Path.Path;
+      const otherHome = yield* fs.makeTempDirectoryScoped({ prefix: "t3-other-home-" });
+      const other = yield* makeService(undefined, "1.2.3", path.join(otherHome, ".t3"));
+      expect(yield* other.start).toBe(false);
+      expect(commands.filter((command) => command.startsWith("systemctl "))).toEqual([]);
+    }),
+  );
+
+  it.effect("start kickstarts the launch agent without killing a running one", () =>
+    Effect.gen(function* () {
+      const { service, commands } = yield* makeHarness("darwin");
+      const plan = yield* service.install({ start: false });
+      commands.length = 0;
+
+      expect(yield* service.start).toBe(true);
+      expect(commands.filter((command) => command.startsWith("launchctl "))).toEqual([
+        "launchctl enable gui/501/com.t3tools.t3code.service",
+        `launchctl bootstrap gui/501 ${plan.unitPath}`,
+        "launchctl kickstart gui/501/com.t3tools.t3code.service",
+      ]);
+    }),
+  );
+
   it.effect("restart leaves a service that serves another T3 home alone", () =>
     Effect.gen(function* () {
       const { service, fs, commands, makeService } = yield* makeHarness();
