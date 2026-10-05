@@ -30,7 +30,6 @@ import {
   ConnectionBlockedError,
   ConnectionTransientError,
   PrimaryConnectionTarget,
-  RelayConnectionTarget,
   type PreparedConnection,
 } from "../connection/model.ts";
 import * as EnvironmentSupervisor from "../connection/supervisor.ts";
@@ -38,7 +37,6 @@ import * as Persistence from "../platform/persistence.ts";
 import * as RpcSession from "./session.ts";
 import { makeEnvironmentServerConfigState } from "../state/server.ts";
 import { applyServerConfigProjection } from "../state/serverConfigProjection.ts";
-import { NETWORK_BLOCKING_HINT } from "../errors/network.ts";
 
 type SocketEventType = "open" | "message" | "close" | "error";
 type SocketEvent = {
@@ -1231,24 +1229,13 @@ describe("RpcSessionFactory", () => {
     ),
   );
 
-  it.effect.each([
-    { relay: false, label: "direct" },
-    { relay: true, label: "relay" },
-  ])("fails readiness when the $label websocket never opens", ({ relay }) =>
+  it.effect("fails readiness when the websocket never opens", () =>
     Effect.gen(function* () {
       const { factory, sockets } = yield* makeFactory();
 
       const error = yield* Effect.scoped(
         Effect.gen(function* () {
-          const session = yield* factory.connect({
-            ...PREPARED,
-            target: relay
-              ? new RelayConnectionTarget({
-                  environmentId: TARGET.environmentId,
-                  label: TARGET.label,
-                })
-              : TARGET,
-          });
+          const session = yield* factory.connect(PREPARED);
           const readyFiber = yield* Effect.forkChild(Effect.flip(session.ready));
           yield* awaitSocket(sockets);
 
@@ -1260,7 +1247,7 @@ describe("RpcSessionFactory", () => {
       expect(error).toBeInstanceOf(ConnectionTransientError);
       expect(error).toMatchObject({
         reason: "transport",
-        message: `Test environment could not establish a WebSocket connection.${relay ? ` ${NETWORK_BLOCKING_HINT}` : ""}`,
+        message: "Test environment could not establish a WebSocket connection.",
       });
       expect(sockets[0]?.readyState).toBe(TestWebSocket.CLOSED);
     }).pipe(Effect.provide(TestClock.layer())),

@@ -102,7 +102,7 @@ Install T3 Code from the
 [App Store](https://apps.apple.com/us/app/t3-code-remote-claude-more/id6787819824) or
 [Google Play](https://play.google.com/store/apps/details?id=com.t3tools.t3code).
 The phone connects to a server on another machine. Follow
-[remote access](./remote-access.md) to link it through T3 Connect or a pairing URL.
+[remote access](./remote-access.md) to pair it with a pairing URL.
 
 Nightly builds need the beta app. The store apps cannot connect to them. A Nightly build also
 shows these links as QR codes in **Settings → General → Mobile app**.

@@ -1,6 +1,5 @@
 import { describe, expect, it } from "vite-plus/test";
 
-import { NETWORK_BLOCKING_HINT } from "./network.ts";
 import { isTransportConnectionErrorMessage, sanitizeThreadErrorMessage } from "./transport.ts";
 
 describe("isTransportConnectionErrorMessage", () => {
@@ -31,13 +30,7 @@ describe("isTransportConnectionErrorMessage", () => {
     expect(isTransportConnectionErrorMessage("ClientProtocolError: socket closed")).toBe(true);
   });
 
-  it("recognizes relay connection errors that carry the network hint", () => {
-    for (const sentence of [
-      "Relay environment disconnected.",
-      "Relay environment could not establish a WebSocket connection.",
-    ]) {
-      expect(isTransportConnectionErrorMessage(`${sentence} ${NETWORK_BLOCKING_HINT}`)).toBe(true);
-    }
+  it("does not treat a session sentence followed by other text as a connection error", () => {
     expect(
       isTransportConnectionErrorMessage(
         "Your ChatGPT connection expired or was disconnected. Sign in again.",
