@@ -43,6 +43,7 @@ import {
   type ProviderDriverKind,
 } from "./providerInstance.ts";
 import { PullRequestMergeMethod } from "./pullRequest.ts";
+import { TailscaleServeHttpsPort } from "./remoteAccess.ts";
 
 // ── Client Settings (local-only) ───────────────────────────────
 
@@ -1248,6 +1249,12 @@ export const StorageCleanupSettings = Schema.Struct({
 });
 export type StorageCleanupSettings = typeof StorageCleanupSettings.Type;
 
+export const TailscaleServeSettings = Schema.Struct({
+  enabled: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
+  port: TailscaleServeHttpsPort.pipe(Schema.withDecodingDefault(Effect.succeed(443 as const))),
+});
+export type TailscaleServeSettings = typeof TailscaleServeSettings.Type;
+
 export const ServerSettings = Schema.Struct({
   worktreeCleanup: WorktreeCleanup.pipe(Schema.withDecodingDefault(Effect.succeed(null))),
   storageCleanup: StorageCleanupSettings.pipe(
@@ -1357,6 +1364,15 @@ export const ServerSettings = Schema.Struct({
   ),
   backgroundActivityProfile: BackgroundActivityProfile.pipe(
     Schema.withDecodingDefault(Effect.succeed(DEFAULT_BACKGROUND_ACTIVITY_PROFILE)),
+  ),
+  /**
+   * Publish this server over Tailscale Serve HTTPS. Survives restarts, so a
+   * background service keeps its tailnet URL. Changed only through
+   * `server.setTailscaleServe`, which needs access:write, never the generic
+   * settings update.
+   */
+  tailscaleServe: TailscaleServeSettings.pipe(
+    Schema.withDecodingDefault(Effect.succeed(Schema.decodeSync(TailscaleServeSettings)({}))),
   ),
   defaultTheme: DefaultThemePreference.pipe(Schema.withDecodingDefault(Effect.succeed(""))),
   /**
@@ -1792,6 +1808,8 @@ export const ServerSettingsPatch = Schema.Struct({
   usageModelAliases: Schema.optionalKey(
     Schema.Record(TrimmedNonEmptyString, Schema.NullOr(TrimmedNonEmptyString)),
   ),
+  /** Server-internal: `server.updateSettings` drops it; see `ServerSettings.tailscaleServe`. */
+  tailscaleServe: Schema.optionalKey(TailscaleServeSettings),
 });
 export type ServerSettingsPatch = typeof ServerSettingsPatch.Type;
 

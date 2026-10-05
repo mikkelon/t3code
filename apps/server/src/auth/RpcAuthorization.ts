@@ -14,6 +14,7 @@ import {
   AuthFilesystemReadScope,
   AuthFilesystemWriteScope,
   AuthDiagnosticsReadScope,
+  AuthAccessWriteScope,
   AuthOrchestrationOperateScope,
   AuthOrchestrationReadScope,
   AuthPreviewOperateScope,
@@ -79,6 +80,9 @@ export const RPC_REQUIRED_SCOPES = {
   [WS_METHODS.serverRemoveKeybinding]: AuthSettingsWriteScope,
   [WS_METHODS.serverGetSettings]: AuthOrchestrationReadScope,
   [WS_METHODS.serverUpdateSettings]: AuthSettingsWriteScope,
+  // Network exposure, like pairing: only administrative clients.
+  [WS_METHODS.serverGetTailscaleServe]: AuthAccessWriteScope,
+  [WS_METHODS.serverSetTailscaleServe]: AuthAccessWriteScope,
   [WS_METHODS.serverSearchAcpRegistry]: AuthOrchestrationReadScope,
   [WS_METHODS.serverPrepareAcpRegistryAgent]: AuthProvidersManageScope,
   [WS_METHODS.serverUninstallAcpRegistryManagedBinary]: AuthProvidersManageScope,
