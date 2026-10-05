@@ -58,6 +58,8 @@ export class ElectronShell extends Context.Service<
     readonly openExternal: (rawUrl: unknown) => Effect.Effect<boolean>;
     readonly openSystemSettings: (pane: SystemSettingsPane) => Effect.Effect<boolean>;
     readonly copyText: (text: string) => Effect.Effect<void>;
+    /** Opens a local file with its default application. */
+    readonly openPath: (path: string) => Effect.Effect<void>;
   }
 >()("@t3tools/desktop/electron/ElectronShell") {}
 
@@ -83,6 +85,13 @@ export const make = ElectronShell.of({
     ),
   copyText: (text) =>
     Effect.promise(() => Electron.clipboard.writeText(text).catch(() => undefined)),
+  openPath: (path) =>
+    Effect.promise(() =>
+      Electron.shell.openPath(path).then(
+        () => undefined,
+        () => undefined,
+      ),
+    ),
 });
 
 export const layer = Layer.succeed(ElectronShell, make);
