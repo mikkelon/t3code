@@ -12,6 +12,13 @@ import * as Path from "effect/Path";
 import { HttpClient } from "effect/http";
 import * as Schema from "effect/Schema";
 
+import {
+  BOOT_SERVICE_LAUNCHD_LABEL,
+  BOOT_SERVICE_PLIST_FILE,
+  BOOT_SERVICE_UNIT_FILE,
+  bootServiceBaseDirOf,
+  bootServiceUnitPath,
+} from "@t3tools/shared/bootServiceUnit";
 import { CLI_RELEASE_BASE_URL_ENV } from "@t3tools/shared/cliRelease";
 
 import * as ProcessRunner from "../processRunner.ts";
@@ -20,6 +27,7 @@ import {
   pinnedRuntimeCommand,
   pinnedRuntimePaths,
   PinnedRuntimeInstallError,
+  type PinnedRuntimePaths,
 } from "./pinnedRuntime.ts";
 import {
   SERVICE_LAUNCHER_PROTOCOL,
@@ -32,12 +40,7 @@ import {
   type ServiceState,
 } from "./serviceProtocol.ts";
 
-const BOOT_SERVICE_NAME = "t3code";
-export const BOOT_SERVICE_UNIT_FILE = `${BOOT_SERVICE_NAME}.service`;
-// `.service` suffix keeps the label distinct from the desktop app's bundle id
-// (com.t3tools.t3code), so launchd and TCC records never collide.
-export const BOOT_SERVICE_LAUNCHD_LABEL = "com.t3tools.t3code.service";
-export const BOOT_SERVICE_PLIST_FILE = `${BOOT_SERVICE_LAUNCHD_LABEL}.plist`;
+export { bootServiceBaseDirOf };
 const BOOT_SERVICE_UNIT_ENV = "T3_BOOT_SERVICE_UNIT";
 export const BOOT_SERVICE_LOG_FILE = "boot-service.log";
 
@@ -61,13 +64,6 @@ const unquoteSystemdValue = (raw: string) =>
 
 const unescapeXmlText = (value: string) =>
   value.replaceAll("&lt;", "<").replaceAll("&gt;", ">").replaceAll("&amp;", "&");
-
-export function bootServiceBaseDirOf(contents: string): string | undefined {
-  const systemd = /^Environment=T3CODE_HOME=(.*)$/m.exec(contents)?.[1];
-  if (systemd !== undefined) return unquoteSystemdValue(systemd.trim());
-  const plist = /<key>T3CODE_HOME<\/key>\s*<string>([^<]*)<\/string>/.exec(contents)?.[1];
-  return plist === undefined ? undefined : unescapeXmlText(plist);
-}
 
 /** The executable an installed unit or plist starts: the launcher's runtime. */
 export function bootServiceProgramOf(contents: string): string | undefined {
@@ -199,6 +195,7 @@ export interface BootServiceManager {
   readonly restart: ReadonlyArray<BootServiceStep>;
   /** Queue a restart owned by the manager, since stopping would kill the caller. */
   readonly handoff?: ReadonlyArray<BootServiceStep>;
+  readonly start: ReadonlyArray<BootServiceStep>;
   readonly deactivate: ReadonlyArray<BootServiceStep>;
   readonly finalize: ReadonlyArray<BootServiceStep>;
 }
@@ -207,13 +204,10 @@ function systemdManager(input: {
   readonly path: Path.Path;
   readonly homeDir: string;
 }): BootServiceManager {
-  const unitPath = input.path.join(
-    input.homeDir,
-    ".config",
-    "systemd",
-    "user",
-    BOOT_SERVICE_UNIT_FILE,
-  );
+  // selectBootServiceManager only builds a manager for a non-empty home.
+  const unitPath =
+    bootServiceUnitPath({ platform: "linux", homeDir: input.homeDir, joinPath: input.path.join }) ??
+    "";
   const prepareActivation = [
     {
       step: "reloading systemd user units",
@@ -261,6 +255,15 @@ function systemdManager(input: {
         args: ["--user", "restart", "--no-block", BOOT_SERVICE_UNIT_FILE],
       },
     ],
+    // `install --no-start` leaves a fresh unit unloaded and disabled.
+    start: [
+      ...prepareActivation,
+      {
+        step: "starting the service",
+        command: "systemctl",
+        args: ["--user", "start", BOOT_SERVICE_UNIT_FILE],
+      },
+    ],
     deactivate: [
       {
         step: "stopping the service",
@@ -285,12 +288,13 @@ function launchdManager(input: {
   readonly uid: number;
   readonly environmentPath: string;
 }): BootServiceManager {
-  const unitPath = input.path.join(
-    input.homeDir,
-    "Library",
-    "LaunchAgents",
-    BOOT_SERVICE_PLIST_FILE,
-  );
+  // selectBootServiceManager only builds a manager for a non-empty home.
+  const unitPath =
+    bootServiceUnitPath({
+      platform: "darwin",
+      homeDir: input.homeDir,
+      joinPath: input.path.join,
+    }) ?? "";
   const domainTarget = `gui/${input.uid}`;
   const serviceTarget = `${domainTarget}/${BOOT_SERVICE_LAUNCHD_LABEL}`;
   // Unloaded jobs may reject bootout/enable. Bootstrap starts RunAtLoad/KeepAlive jobs; kickstart would restart them.
@@ -331,6 +335,28 @@ function launchdManager(input: {
         step: "restarting the service after a failed update",
         command: "launchctl",
         args: ["bootstrap", domainTarget, unitPath],
+      },
+    ],
+    // bootstrap loads and starts an unloaded job and fails harmlessly on a
+    // loaded one; kickstart without -k then starts a loaded job that is not
+    // running and leaves a running one alone.
+    start: [
+      {
+        step: "enabling the launch agent",
+        command: "launchctl",
+        args: ["enable", serviceTarget],
+        optional: true,
+      },
+      {
+        step: "loading the launch agent",
+        command: "launchctl",
+        args: ["bootstrap", domainTarget, unitPath],
+        optional: true,
+      },
+      {
+        step: "starting the service",
+        command: "launchctl",
+        args: ["kickstart", serviceTarget],
       },
     ],
     // Persisted launchctl disable overrides would block reinstall.
@@ -416,14 +442,22 @@ const BootServiceProblem = Schema.Literals([
 ]);
 type BootServiceProblem = typeof BootServiceProblem.Type;
 
+/**
+ * Lingering only decides whether the service outlives the login session, so
+ * it is reported but never blocks an install or makes a service out of date.
+ */
+export function isBootServiceWarning(problem: BootServiceProblem): boolean {
+  return problem === "linger-disabled" || problem === "linger-unavailable";
+}
+
 export function formatBootServiceProblem(problem: BootServiceProblem): string {
   switch (problem) {
     case "user-manager-unavailable":
       return "Cannot reach the systemd user manager. Run `systemctl --user status` in a login session for the service user. Install your distribution's systemd user-session support if it is missing; do not run T3 with sudo.";
     case "linger-unavailable":
-      return 'Cannot check whether this user can run services after logout. Run `loginctl show-user "$(id -un)" --property=Linger` and check that systemd-logind is available.';
+      return 'Cannot check whether this user can run services after logout, so T3 Code may stop when your last login session ends. Run `loginctl show-user "$(id -un)" --property=Linger` and check that systemd-logind is available.';
     case "linger-disabled":
-      return 'Lingering is disabled. T3 Code will stop when your last login session ends and will not start at boot. Run `sudo loginctl enable-linger "$(id -un)"` on this machine, then retry the service command as your normal user.';
+      return 'Lingering is disabled, so T3 Code runs while you are logged in, stops when your last login session ends, and does not start at boot. To keep it running, run `sudo loginctl enable-linger "$(id -un)"` once.';
     case "service-disabled":
       return "The service is not enabled to start automatically. Run `t3 service install` to repair it.";
     case "service-stopped":
@@ -482,13 +516,28 @@ export interface BootServiceStatus {
   readonly logPath: string;
 }
 
+export interface BootServiceRuntimeOptions {
+  /**
+   * Unpack this release archive instead of downloading one. The desktop app
+   * passes the archive it ships, so the service runs the app's own version
+   * without a network.
+   */
+  readonly runtimeArchive?: string | undefined;
+}
+
 export class BootService extends Context.Service<
   BootService,
   {
-    readonly install: (options?: {
-      readonly allowDowngrade?: boolean;
-      readonly start?: boolean;
-    }) => Effect.Effect<BootServicePlan, BootServiceError>;
+    /** Puts this version's runtime in place without touching the service. */
+    readonly stage: (
+      options?: BootServiceRuntimeOptions,
+    ) => Effect.Effect<PinnedRuntimePaths, BootServiceError>;
+    readonly install: (
+      options?: BootServiceRuntimeOptions & {
+        readonly allowDowngrade?: boolean;
+        readonly start?: boolean;
+      },
+    ) => Effect.Effect<BootServicePlan, BootServiceError>;
     /**
      * Only when the unit serves this base dir: the unit name is per user, so
      * another home's service is left alone, which resolves `skipped`. From
@@ -496,6 +545,11 @@ export class BootService extends Context.Service<
      * manager, since the stop ends this process.
      */
     readonly restart: Effect.Effect<"restarted" | "queued" | "skipped", BootServiceError>;
+    /**
+     * Starts the installed service if it is not running; a running service is left alone.
+     * Same base-dir guard as restart. Resolves false when nothing is installed for this base dir.
+     */
+    readonly start: Effect.Effect<boolean, BootServiceError>;
     /**
      * Runs the operation with this home's service stopped; other homes are left alone.
      * Restores a previously enabled or loaded service even if stopping failed.
@@ -690,36 +744,24 @@ export const make = Effect.fn("cloud.boot_service.make")(function* (input: {
 
   const requireSystemdPrerequisites = Effect.gen(function* () {
     const problems = yield* readSystemdProblems(false);
-    const unavailable = problems.find((problem) => problem !== "linger-disabled");
+    const unavailable = problems.find((problem) => !isBootServiceWarning(problem));
     if (unavailable) return yield* new BootServicePrerequisiteError({ problem: unavailable });
     if (!problems.includes("linger-disabled")) return;
+    // polkit lets an active local session enable lingering for its own user,
+    // so this usually works without sudo. When it is refused, the service
+    // still runs while the user is logged in; status reports the warning and
+    // the refusal is in the boot-service log.
     yield* runStep("enabling lingering for this user", "loginctl", [
       "enable-linger",
       "--no-ask-password",
       ...(uid === undefined ? [] : [String(uid)]),
-    ]).pipe(
-      Effect.mapError(
-        (cause) => new BootServicePrerequisiteError({ problem: "linger-disabled", cause }),
-      ),
-    );
-    const remaining = yield* readSystemdProblems(false);
-    if (remaining[0]) return yield* new BootServicePrerequisiteError({ problem: remaining[0] });
+    ]).pipe(Effect.ignore);
   });
 
-  const install = Effect.fn("cloud.boot_service.install")(function* (options?: {
-    readonly allowDowngrade?: boolean;
-    readonly start?: boolean;
-  }) {
-    const manager = yield* requireManager;
-    yield* fs
-      .makeDirectory(input.logsDir, { recursive: true })
-      .pipe(Effect.mapError((cause) => new BootServiceInstallError({ cause })));
-
-    if (manager.kind === "systemd") {
-      yield* requireSystemdPrerequisites.pipe(Effect.tapError(logFailure));
-    }
-
-    yield* ensurePinnedRuntimeInstalled({
+  const stage = Effect.fn("cloud.boot_service.stage")(function* (
+    options?: BootServiceRuntimeOptions,
+  ) {
+    return yield* ensurePinnedRuntimeInstalled({
       baseDir: input.baseDir,
       version: input.cliVersion,
       fs,
@@ -729,6 +771,7 @@ export const make = Effect.fn("cloud.boot_service.make")(function* (input: {
       platform,
       arch,
       releaseBaseUrl,
+      localArchive: options?.runtimeArchive,
       validate: (runtime) =>
         runner
           .run({
@@ -771,6 +814,24 @@ export const make = Effect.fn("cloud.boot_service.make")(function* (input: {
           : new BootServiceInstallError({ cause: error }),
       ),
     );
+  });
+
+  const install = Effect.fn("cloud.boot_service.install")(function* (
+    options?: BootServiceRuntimeOptions & {
+      readonly allowDowngrade?: boolean;
+      readonly start?: boolean;
+    },
+  ) {
+    const manager = yield* requireManager;
+    yield* fs
+      .makeDirectory(input.logsDir, { recursive: true })
+      .pipe(Effect.mapError((cause) => new BootServiceInstallError({ cause })));
+
+    if (manager.kind === "systemd") {
+      yield* requireSystemdPrerequisites.pipe(Effect.tapError(logFailure));
+    }
+
+    yield* stage(options);
     const installed = yield* fs
       .exists(unitPath)
       .pipe(Effect.mapError((cause) => new BootServiceInstallError({ cause })));
@@ -865,17 +926,19 @@ export const make = Effect.fn("cloud.boot_service.make")(function* (input: {
     return plan;
   });
 
+  const servesThisBaseDir = Effect.gen(function* () {
+    const unit = yield* fs.readFileString(unitPath).pipe(Effect.option);
+    if (Option.isNone(unit)) return false;
+    const installedBaseDir = bootServiceBaseDirOf(unit.value);
+    return (
+      installedBaseDir !== undefined &&
+      path.resolve(installedBaseDir) === path.resolve(input.baseDir)
+    );
+  });
+
   const restart: BootService["Service"]["restart"] = Effect.gen(function* () {
     const manager = yield* requireManager;
-    const unit = yield* fs.readFileString(unitPath).pipe(Effect.option);
-    if (Option.isNone(unit)) return "skipped" as const;
-    const installedBaseDir = bootServiceBaseDirOf(unit.value);
-    if (
-      installedBaseDir === undefined ||
-      path.resolve(installedBaseDir) !== path.resolve(input.baseDir)
-    ) {
-      return "skipped" as const;
-    }
+    if (!(yield* servesThisBaseDir)) return "skipped" as const;
     // Writes no state, and the launcher lets an update transition in flight
     // finish before the queued stop tears it down.
     if (runningInsideService && manager.handoff !== undefined) {
@@ -894,6 +957,13 @@ export const make = Effect.fn("cloud.boot_service.make")(function* (input: {
     ),
     Effect.withSpan("cloud.boot_service.restart"),
   );
+
+  const start: BootService["Service"]["start"] = Effect.gen(function* () {
+    const manager = yield* requireManager;
+    if (!(yield* servesThisBaseDir)) return false;
+    yield* runSteps(manager.start);
+    return true;
+  }).pipe(Effect.withSpan("cloud.boot_service.start"));
 
   const withStopped = Effect.fn("cloud.boot_service.with_stopped")(function* <A, E, R>(
     operation: Effect.Effect<A, E, R>,
@@ -992,7 +1062,7 @@ export const make = Effect.fn("cloud.boot_service.make")(function* (input: {
       ...(installedBaseDir === undefined ? {} : { installedBaseDir }),
       problems,
       current:
-        problems.length === 0 &&
+        problems.every(isBootServiceWarning) &&
         normalizeUnit(unit) === normalizeUnit(detectedManager.render(plan)) &&
         runtimeEntryExists &&
         Option.isSome(runtimeSentinel) &&
@@ -1007,7 +1077,7 @@ export const make = Effect.fn("cloud.boot_service.make")(function* (input: {
     Effect.withSpan("cloud.boot_service.status"),
   );
 
-  return BootService.of({ install, restart, withStopped, uninstall, status });
+  return BootService.of({ stage, install, restart, start, withStopped, uninstall, status });
 });
 
 export const layer = (input: {

@@ -411,6 +411,10 @@
       "types": "./src/hostClassification.ts",
       "import": "./src/hostClassification.ts"
     },
+    "./bootServiceUnit": {
+      "types": "./src/bootServiceUnit.ts",
+      "import": "./src/bootServiceUnit.ts"
+    },
     "./cliRelease": {
       "types": "./src/cliRelease.ts",
       "import": "./src/cliRelease.ts"
