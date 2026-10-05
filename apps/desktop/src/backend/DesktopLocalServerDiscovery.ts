@@ -99,6 +99,15 @@ const fetchDescriptor = (httpBaseUrl: URL) =>
     );
   }).pipe(Effect.timeout(PROBE_TIMEOUT), Effect.option);
 
+/** The origin the runtime file in `stateDir` names, without checking it. */
+export const readRuntimeOrigin = Effect.fn("desktop.localServer.readRuntimeOrigin")(function* (
+  stateDir: string,
+) {
+  const path = yield* Path.Path;
+  const raw = yield* readTrimmed(path.join(stateDir, "server-runtime.json"));
+  return Option.flatMap(raw, decodeRuntimeState).pipe(Option.map((state) => state.origin));
+});
+
 /**
  * The server that owns `stateDir`, if one is running. The runtime file alone
  * is not trusted: its pid must be alive and its origin must answer with the

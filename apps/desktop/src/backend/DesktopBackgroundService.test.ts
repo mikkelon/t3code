@@ -42,7 +42,8 @@ const installUnit = (harness: Harness) =>
   });
 
 // The test process itself: alive for as long as the test runs.
-const runtimeStateJson = `{"version":1,"pid":${process.pid},"port":3773,"origin":"http://127.0.0.1:3773","startedAt":"2026-10-05T00:00:00.000Z","serviceManaged":true}`;
+const runtimeStateJson = (port = 3773) =>
+  `{"version":1,"pid":${process.pid},"port":${port},"origin":"http://127.0.0.1:${port}","startedAt":"2026-10-05T00:00:00.000Z","serviceManaged":true}`;
 
 const writeRuntimeState = (harness: Harness) => harness.writeRuntimeState;
 
@@ -74,7 +75,7 @@ const makeHarness = Effect.fn("test.makeBackgroundServiceHarness")(function* (op
     commands: [],
     dialogs: [],
     writeRuntimeState: fs
-      .writeFileString(path.join(stateDir, "server-runtime.json"), runtimeStateJson)
+      .writeFileString(path.join(stateDir, "server-runtime.json"), runtimeStateJson())
       .pipe(Effect.orDie),
   };
   const responses = [...(options.dialogResponses ?? [])];
