@@ -3,7 +3,7 @@ import * as Effect from "effect/Effect";
 import * as HttpApiBuilder from "effect/http-api/HttpApiBuilder";
 
 import { annotateEnvironmentRequest, requireEnvironmentScope } from "../auth/http.ts";
-import { traceLocalHandlerWork } from "../cloud/traceRelayRequest.ts";
+import { withLocalTracing as traceLocalHandlerWork } from "@t3tools/shared/relayTracing";
 import * as PullRequestService from "./PullRequestService.ts";
 
 /** The patch is often the largest PR payload and benefits from HTTP compression and flow control. */

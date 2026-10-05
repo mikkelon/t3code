@@ -56,7 +56,7 @@ different code depending on it:
 
 - How is T3 Code running on this machine: `t3 serve` in a terminal, the
   background service, or the desktop app?
-- Which surface is the user connecting from: a browser, the
+- Which surface is the user connecting from: a web browser, the
   desktop app against a local server, the desktop app against a remote server,
   or the mobile app?
 

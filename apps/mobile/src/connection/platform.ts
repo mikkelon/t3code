@@ -3,13 +3,7 @@ import {
   PlatformConnectionSource,
   Persistence,
 } from "@t3tools/client-runtime/platform";
-import {
-  ConnectionBlockedError,
-  ConnectionTransientError,
-  Connectivity,
-  Wakeups,
-} from "@t3tools/client-runtime/connection";
-import { managedRelayAccountChanges, managedRelaySessionAtom } from "@t3tools/client-runtime/relay";
+import { ConnectionBlockedError, Connectivity, Wakeups } from "@t3tools/client-runtime/connection";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
@@ -22,8 +16,6 @@ import { AppState } from "react-native";
 
 import { authClientMetadata } from "../lib/authClientMetadata";
 import * as Runtime from "../lib/runtime";
-import * as MobileStorage from "../persistence/mobile-storage";
-import { appAtomRegistry } from "../state/atom-registry";
 import { clearThreadOutboxEnvironment } from "../state/thread-outbox-removal";
 import { clearComposerDraftsEnvironment } from "../state/use-composer-drafts";
 import { clearThreadComposerErrorsForEnvironment } from "../state/thread-composer-error";
@@ -145,9 +137,6 @@ const layerWakeups = Wakeups.layer({
           (subscription) => Effect.sync(() => subscription.remove()),
         ).pipe(Effect.asVoid),
       ),
-      managedRelayAccountChanges(appAtomRegistry).pipe(
-        Stream.map(() => "credentials-changed" as const),
-      ),
       networkPathChanges,
     ],
     { concurrency: "unbounded" },
@@ -155,62 +144,13 @@ const layerWakeups = Wakeups.layer({
 });
 
 const layerCapabilities = Layer.effectContext(
-  Effect.gen(function* () {
-    const storage = yield* MobileStorage.MobileStorage;
-    return Context.make(
-      ClientCapabilities.CloudSession,
-      ClientCapabilities.CloudSession.of({
-        identity: Effect.sync(() =>
-          Option.fromNullishOr(appAtomRegistry.get(managedRelaySessionAtom)),
-        ),
-        clerkToken: Effect.gen(function* () {
-          const session = appAtomRegistry.get(managedRelaySessionAtom);
-          if (session === null) {
-            return yield* new ConnectionBlockedError({
-              reason: "authentication",
-              detail: "Sign in to T3 Connect to connect this environment.",
-            });
-          }
-          const token = yield* session.readClerkToken().pipe(
-            Effect.mapError(
-              (error) =>
-                new ConnectionTransientError({
-                  reason: "network",
-                  detail: error.message,
-                }),
-            ),
-          );
-          if (token === null) {
-            return yield* new ConnectionBlockedError({
-              reason: "authentication",
-              detail: "The T3 Connect session is unavailable.",
-            });
-          }
-          return token;
-        }),
+  Effect.sync(() =>
+    Context.make(
+      ClientCapabilities.PrimaryEnvironmentAuth,
+      ClientCapabilities.PrimaryEnvironmentAuth.of({
+        bearerToken: Effect.succeed(Option.none()),
       }),
     ).pipe(
-      Context.add(
-        ClientCapabilities.PrimaryEnvironmentAuth,
-        ClientCapabilities.PrimaryEnvironmentAuth.of({
-          bearerToken: Effect.succeed(Option.none()),
-        }),
-      ),
-      Context.add(
-        ClientCapabilities.RelayDeviceIdentity,
-        ClientCapabilities.RelayDeviceIdentity.of({
-          deviceId: storage.loadOrCreateAgentAwarenessDeviceId.pipe(
-            Effect.mapError(
-              (cause) =>
-                new ConnectionTransientError({
-                  reason: "remote-unavailable",
-                  detail: `Could not load the mobile device identity: ${String(cause)}`,
-                }),
-            ),
-            Effect.map(Option.some),
-          ),
-        }),
-      ),
       Context.add(
         ClientCapabilities.ClientPresentation,
         ClientCapabilities.ClientPresentation.of({
@@ -237,8 +177,8 @@ const layerCapabilities = Layer.effectContext(
           disconnect: () => Effect.void,
         }),
       ),
-    );
-  }),
+    ),
+  ),
 );
 
 const layerPlatformConnectionSource = Layer.succeed(

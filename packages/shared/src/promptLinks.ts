@@ -1,17 +1,13 @@
-import { DEFAULT_HOSTED_APP_URL } from "./connectAuth.ts";
-
 /**
  * Prompt links open T3 Code from outside it with a prompt ready to send. They never send it:
  * a link from a stranger fills a draft, and the user reads it and presses Send. A link also
  * cannot pick a runtime mode, branch, or worktree. Those stay the user's own defaults.
  *
- * Shared links are https on the hosted app, because that is what Twitter and GitHub make
- * clickable. The `t3code://` scheme carries the same paths into desktop and mobile:
+ * The `t3code://` scheme carries them into desktop and mobile:
  *
- *   https://app.t3.codes/new?prompt=…&repo=owner/name&provider=codex&model=gpt-5
- *   https://app.t3.codes/new?pr=owner/name/123&prompt=…
- *   https://app.t3.codes/<environmentId>/<threadId>?prompt=…
- *   t3code://new?…   t3code://threads/<environmentId>/<threadId>?…
+ *   t3code://new?prompt=…&repo=owner/name&provider=codex&model=gpt-5
+ *   t3code://new?pr=owner/name/123&prompt=…
+ *   t3code://threads/<environmentId>/<threadId>?prompt=…
  */
 
 /** URLs stay well under the limits browsers and link shorteners apply. */
@@ -194,15 +190,14 @@ export function withoutPromptLinkParams(search: string): string {
   return rest ? `?${rest}` : "";
 }
 
-/** A shareable `/new` link on the hosted app. */
+/** A shareable `t3code://new` link that opens the installed desktop or mobile app. */
 export function buildNewThreadLink(input: {
   readonly prompt: string;
   readonly repository?: PromptLinkRepository | null;
   readonly provider?: string | null;
   readonly model?: string | null;
-  readonly origin?: string;
 }): string {
-  const url = new URL("/new", input.origin ?? DEFAULT_HOSTED_APP_URL);
+  const url = new URL("t3code://new");
   url.searchParams.set("prompt", input.prompt);
   if (input.repository) {
     url.searchParams.set("repo", `${input.repository.owner}/${input.repository.name}`);
@@ -217,33 +212,15 @@ const THREAD_PATH = /^\/([^/]+)\/([^/]+)\/?$/;
 
 /**
  * The in-app path a prompt link or thread deep link opens, or null for any other URL.
- * Desktop uses it for links the OS hands over, both `t3code://` ones and, as the default
- * browser on macOS, hosted-app ones.
+ * Desktop uses it for the `t3code://` links the OS hands over.
  */
-export function promptLinkAppPath(
-  value: string,
-  hostedAppUrl: string = DEFAULT_HOSTED_APP_URL,
-): string | null {
+export function promptLinkAppPath(value: string): string | null {
   if (!URL.canParse(value)) return null;
   const url = new URL(value);
-  if (APP_SCHEME.test(url.protocol)) {
-    if (url.host === "new" && (url.pathname === "" || url.pathname === "/")) {
-      return `/new${url.search}`;
-    }
-    const thread = url.host === "threads" ? THREAD_PATH.exec(url.pathname) : null;
-    return thread ? `/${thread[1]}/${thread[2]}${url.search}` : null;
+  if (!APP_SCHEME.test(url.protocol)) return null;
+  if (url.host === "new" && (url.pathname === "" || url.pathname === "/")) {
+    return `/new${url.search}`;
   }
-  if (!URL.canParse(hostedAppUrl) || url.origin !== new URL(hostedAppUrl).origin) return null;
-  if (url.pathname === "/new") return `/new${url.search}`;
-  // Hosted thread links only open in the app when they carry a prompt. A plain one is just a
-  // page on the hosted app.
-  const thread = url.searchParams.has("prompt") ? THREAD_PATH.exec(url.pathname) : null;
+  const thread = url.host === "threads" ? THREAD_PATH.exec(url.pathname) : null;
   return thread ? `/${thread[1]}/${thread[2]}${url.search}` : null;
-}
-
-/** The `t3code://` link that hands an in-app path to an installed desktop or mobile app. */
-export function promptLinkDeepLink(appPath: string, scheme = "t3code"): string {
-  const url = new URL(appPath, "https://app.invalid");
-  const host = url.pathname === "/new" ? "new" : `threads${url.pathname}`;
-  return `${scheme}://${host}${url.search}`;
 }
