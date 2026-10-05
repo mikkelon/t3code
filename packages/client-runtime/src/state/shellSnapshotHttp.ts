@@ -6,10 +6,8 @@ import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import { HttpClient } from "effect/http";
 
-import * as RemoteEnvironmentAuthorization from "../authorization/service.ts";
 import type { PreparedConnection } from "../connection/model.ts";
 import { environmentEndpointUrl } from "../environment/endpoint.ts";
-import * as ManagedRelay from "../relay/managedRelay.ts";
 import {
   executeAuthenticatedEnvironmentHttpRequest,
   withOrchestrationProtocolHeader,
@@ -31,14 +29,7 @@ const DEFAULT_SHELL_SNAPSHOT_TIMEOUT_MS = 20_000;
  */
 export const fetchEnvironmentShellSnapshot = Effect.fn(
   "clientRuntime.state.fetchEnvironmentShellSnapshot",
-)(function* (input: {
-  readonly prepared: PreparedConnection;
-  readonly signer: Option.Option<ManagedRelay.ManagedRelayDpopSigner["Service"]>;
-  readonly remoteAuthorization?: Option.Option<
-    RemoteEnvironmentAuthorization.RemoteEnvironmentAuthorization["Service"]
-  >;
-  readonly timeoutMs?: number;
-}) {
+)(function* (input: { readonly prepared: PreparedConnection; readonly timeoutMs?: number }) {
   return yield* executeAuthenticatedEnvironmentHttpRequest({
     ...input,
     group: "orchestration",
@@ -69,15 +60,9 @@ export const layer: Layer.Layer<ShellSnapshotLoader, never, HttpClient.HttpClien
   ShellSnapshotLoader,
   Effect.gen(function* () {
     const httpClient = yield* HttpClient.HttpClient;
-    // Resolve the DPoP signer optionally: it is only needed for relay/DPoP
-    // connections, so the loader must not hard-require it.
-    const signer = yield* Effect.serviceOption(ManagedRelay.ManagedRelayDpopSigner);
-    const remoteAuthorization = yield* Effect.serviceOption(
-      RemoteEnvironmentAuthorization.RemoteEnvironmentAuthorization,
-    );
     return ShellSnapshotLoader.of({
       load: (prepared: PreparedConnection) =>
-        fetchEnvironmentShellSnapshot({ prepared, signer, remoteAuthorization }).pipe(
+        fetchEnvironmentShellSnapshot({ prepared }).pipe(
           Effect.map(Option.some<OrchestrationV2ShellSnapshot>),
           Effect.provideService(HttpClient.HttpClient, httpClient),
           Effect.catchCause((cause) =>

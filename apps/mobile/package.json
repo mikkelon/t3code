@@ -46,14 +46,12 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@clerk/expo": "catalog:",
     "@effect/atom-react": "catalog:",
     "@expo-google-fonts/dm-sans": "^0.4.2",
     "@expo/metro-runtime": "~58.0.10",
     "@expo/ui": "~58.0.11",
     "@legendapp/list": "catalog:",
     "@material/material-color-utilities": "0.3.0",
-    "@noble/curves": "catalog:",
     "@pierre/diffs": "catalog:",
     "@react-native-ai/apple": "0.12.0",
     "@react-native-menu/menu": "^2.0.0",
@@ -77,7 +75,6 @@
     "expo": "58.0.2",
     "expo-asset": "~58.0.10",
     "expo-audio": "58.0.4",
-    "expo-auth-session": "~58.0.7",
     "expo-blur": "58.0.3",
     "expo-build-properties": "~58.0.9",
     "expo-camera": "~58.0.7",
@@ -97,7 +94,6 @@
     "expo-keep-awake": "~58.0.3",
     "expo-linking": "~58.0.10",
     "expo-network": "~58.0.3",
-    "expo-notifications": "~58.0.11",
     "expo-paste-input": "^0.1.15",
     "expo-quick-actions": "^6.0.2",
     "expo-secure-store": "~58.0.2",
@@ -108,7 +104,6 @@
     "expo-symbols": "~58.0.3",
     "expo-updates": "~58.0.13",
     "expo-video": "~58.0.6",
-    "expo-web-browser": "~58.0.4",
     "expo-widgets": "58.0.11",
     "react": "19.3.0",
     "react-dom": "19.3.0",
@@ -147,7 +142,6 @@
     },
     "autolinking": {
       "buildFromSource": [
-        "expo-notifications",
         "react-native-screens",
         "react-native-reanimated",
         "@react-native-menu/menu",
