@@ -1,4 +1,5 @@
-import { NETWORK_BLOCKING_HINT, UNRESPONSIVE_HOST_HINT } from "./network.ts";
+/** For a host that stopped answering on an open connection, so the network path was already working. */
+export const UNRESPONSIVE_HOST_HINT = "It may be overloaded, asleep, or off the network.";
 
 const escapeRegExp = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
@@ -7,12 +8,8 @@ const TRANSPORT_ERROR_PATTERNS = [
   /\bSocketOpenError\b/i,
   /\bSocket is not connected\b/i,
   /Unable to connect to the T3 server WebSocket\./i,
-  // The RPC session appends the network hint for relay connections. Any other
-  // trailing text means a different error that the user should still see.
-  new RegExp(
-    `\\b(?:is not connected|disconnected|stopped responding|could not establish a WebSocket connection)\\.(?: ${escapeRegExp(NETWORK_BLOCKING_HINT)})?$`,
-    "i",
-  ),
+  // Any trailing text means a different error that the user should still see.
+  /\b(?:is not connected|disconnected|stopped responding|could not establish a WebSocket connection)\.$/i,
   new RegExp(`\\bstopped responding for \\d+s\\. ${escapeRegExp(UNRESPONSIVE_HOST_HINT)}$`, "i"),
   /\bClientProtocolError\b/i,
   /\bRpcClientError\b/i,

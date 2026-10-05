@@ -1,5 +1,4 @@
 export * from "./catalog.ts";
-export * from "./diagnosis.ts";
 export * as Connectivity from "./connectivity.ts";
 export * as CredentialStore from "./credentialStore.ts";
 export { type ConnectionDriverProgress, type EnvironmentConnectionLease } from "./driver.ts";
@@ -19,6 +18,5 @@ export { EnvironmentNotRegisteredError, PlatformEnvironmentRemovalError } from "
 export * as EnvironmentSupervisor from "./supervisor.ts";
 export * as Wakeups from "./wakeups.ts";
 
-export { orchestrationProtocolCompatibilityError } from "./compatibility.ts";
 // Flat so consumers' inferred command types can name it.
 export { OutdatedHostUpdateError } from "./outdatedHostUpdate.ts";

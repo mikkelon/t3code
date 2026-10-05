@@ -6,17 +6,12 @@ import * as ConfigProvider from "effect/ConfigProvider";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
-import * as Terminal from "effect/Terminal";
 import { Command } from "effect/cli";
 import { afterEach, vi } from "vite-plus/test";
 
 import packageJson from "../../package.json" with { type: "json" };
 import * as BootService from "../cloud/bootService.ts";
-import {
-  offerServiceDuringOnboarding,
-  recoverServiceOnboardingOffer,
-  serviceCommand,
-} from "./service.ts";
+import { serviceCommand } from "./service.ts";
 
 afterEach(() => vi.restoreAllMocks());
 
@@ -89,35 +84,3 @@ it.layer(Layer.mergeAll(NodeServices.layer, NetService.layer))("service commands
       }),
   );
 });
-
-it.effect("leaves a newer service unchanged during onboarding without prompting", () =>
-  Effect.gen(function* () {
-    const { service, installOptions } = makeTestService(newerServiceStatus);
-    const terminal = Terminal.make({
-      columns: Effect.succeed(80),
-      rows: Effect.succeed(24),
-      readInput: Effect.die("Onboarding must not prompt to replace a newer service."),
-      readLine: Effect.die("Onboarding must not prompt to replace a newer service."),
-      display: () => Effect.die("Onboarding must not prompt to replace a newer service."),
-    });
-
-    const ready = yield* offerServiceDuringOnboarding.pipe(
-      Effect.provideService(BootService.BootService, service),
-      Effect.provideService(Terminal.Terminal, terminal),
-      Effect.provide(NodeServices.layer),
-    );
-
-    expect(ready).toBe("skipped");
-    expect(installOptions).toEqual([]);
-  }),
-);
-
-// regression: #9602 diagnose incomplete headless server setup
-it.effect("keeps the manual-server fallback when background prerequisites fail", () =>
-  Effect.gen(function* () {
-    const ready = yield* recoverServiceOnboardingOffer(
-      Effect.fail(new BootService.BootServicePrerequisiteError({ problem: "linger-disabled" })),
-    );
-    expect(ready).toBe("skipped");
-  }),
-);

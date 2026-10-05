@@ -15,10 +15,7 @@ import {
   useState,
 } from "react";
 
-import {
-  PRIMARY_SETTINGS_UNAVAILABLE_MESSAGE,
-  usePrimarySettingsAvailable,
-} from "../../hooks/useSettings";
+import { PRIMARY_SETTINGS_UNAVAILABLE_MESSAGE } from "../../hooks/useSettings";
 import { cn } from "../../lib/utils";
 import { WorkspacePageContainer, type WorkspacePageWidth } from "../WorkspacePageContainer";
 import { Button } from "../ui/button";
@@ -334,7 +331,6 @@ export function SettingsRow({
   children?: ReactNode;
 }) {
   const targetRef = useSettingsSearchTarget<HTMLDivElement>(rowProps.id);
-  const primarySettingsAvailable = usePrimarySettingsAvailable();
   const context = useOptionalSettingsScope();
   const primaryEnvironmentId = usePrimaryEnvironmentId();
   const primaryEnvironment = usePrimaryEnvironment();
@@ -359,8 +355,7 @@ export function SettingsRow({
     context && isProjectScope ? scopedSettingsSource(context.targets, scopedKeys) : null;
   const unavailable =
     serverScoped &&
-    (!canWriteSettings ||
-      !(context ? context.connectedEnvironments.length > 0 : primarySettingsAvailable));
+    (!canWriteSettings || (context !== null && context.connectedEnvironments.length === 0));
   const inheritedFrom =
     source === "environment" && context?.scope.environmentIds.length === 1
       ? (context.environments.find(

@@ -12,7 +12,7 @@ import { resolveSymlinkTarget } from "@t3tools/shared/symlink";
  * without delete sharing, such as a virus scanner or the search indexer. The same
  * codes also mean a denial that never clears, so retries need a bound.
  */
-export const isWindowsRenameLock = (error: PlatformError.PlatformError) => {
+const isWindowsRenameLock = (error: PlatformError.PlatformError) => {
   const code = (error.reason.cause as NodeJS.ErrnoException | undefined)?.code;
   return code === "EBUSY" || code === "EPERM" || code === "EACCES";
 };

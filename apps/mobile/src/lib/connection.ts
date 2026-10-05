@@ -9,26 +9,6 @@ export interface SavedRemoteConnection {
   readonly httpBaseUrl: string;
   readonly wsBaseUrl: string;
   readonly bearerToken: string | null;
-  readonly authenticationMethod?: "bearer" | "dpop";
-  readonly dpopAccessToken?: string;
-  readonly relayManaged?: true;
 }
 
 export type RemoteClientConnectionState = EnvironmentConnectionPhase;
-
-export function isRelayManagedConnection(
-  connection: Pick<SavedRemoteConnection, "authenticationMethod" | "relayManaged">,
-): boolean {
-  return connection.relayManaged === true || connection.authenticationMethod === "dpop";
-}
-
-export function toStableSavedRemoteConnection(
-  connection: SavedRemoteConnection,
-): SavedRemoteConnection {
-  if (!isRelayManagedConnection(connection) || !connection.dpopAccessToken) {
-    return connection;
-  }
-
-  const { dpopAccessToken: _, ...stableConnection } = connection;
-  return stableConnection;
-}

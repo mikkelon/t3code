@@ -44,7 +44,6 @@ import {
   gitHubRoutingConnectionKey,
 } from "./githubRoutingPermissions.ts";
 import {
-  RELAY_ROUTE_ID,
   connectionRouteId,
   connectionRoutes,
   credentialConnectionId,
@@ -143,12 +142,6 @@ export class EnvironmentRegistry extends Context.Service<
       | EnvironmentNotRegisteredError
       | PlatformEnvironmentRemovalError
       | ConnectionBlockedError
-    >;
-    readonly removeRelayEnvironments: () => Effect.Effect<
-      void,
-      | Persistence.ConnectionPersistenceError
-      | ConnectionAttemptError
-      | PlatformEnvironmentRemovalError
     >;
     readonly retryNow: (environmentId: EnvironmentId) => Effect.Effect<void>;
     readonly setEnabled: (
@@ -976,28 +969,6 @@ export const make = Effect.gen(function* () {
     );
   });
 
-  const removeRelayEnvironments = Effect.fn("EnvironmentRegistry.removeRelayEnvironments")(
-    function* () {
-      const relayEnvironmentIds = [...(yield* SubscriptionRef.get(entries)).values()]
-        .filter((entry) =>
-          connectionRoutes(entry).some((route) => route.target._tag === "RelayConnectionTarget"),
-        )
-        .map((entry) => entry.target.environmentId);
-
-      yield* Effect.forEach(
-        relayEnvironmentIds,
-        (environmentId) =>
-          removeRoute(environmentId, RELAY_ROUTE_ID).pipe(
-            Effect.catchTags({ EnvironmentNotRegisteredError: () => Effect.void }),
-          ),
-        {
-          concurrency: "unbounded",
-          discard: true,
-        },
-      );
-    },
-  );
-
   const retryNow = (environmentId: EnvironmentId) =>
     acquireSupervisor(environmentId).pipe(
       Effect.flatMap((supervisor) => supervisor.retryNow),
@@ -1144,7 +1115,6 @@ export const make = Effect.gen(function* () {
     remove,
     removeRoute,
     reorderRoutes,
-    removeRelayEnvironments,
     retryNow,
     setEnabled,
     setCompatibility,
