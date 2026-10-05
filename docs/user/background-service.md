@@ -40,6 +40,31 @@ downloaded versions after showing you the list and asking once. Your projects,
 threads, and settings under `~/.t3/userdata` are kept. Pass `--yes` from a
 script.
 
+## The desktop app and the service
+
+When the service is installed, the desktop app on the same computer uses it as
+its local environment instead of starting a server of its own. Nothing needs
+pairing. **Settings → Connections** shows **Background service**, and closing
+the app leaves your agents running. If the service is stopped, the app starts
+it. If it cannot, the app offers to retry instead of opening without it; run
+`t3 service status` to see why. While the service is restarting or updating,
+the app shows that it is reconnecting.
+
+Without the service, choose **Set up** next to **Keep agents running in the
+background** in **Settings → Connections**. T3 Code installs the service for
+the version you are running, restarts, and hands its agents over to it.
+Quitting while agents are running offers the same. Running turns are
+interrupted by the switch unless continuing threads after server updates is
+turned on. On Linux, if allowing T3 Code to run after logout needs an
+administrator, the app shows the `loginctl` command to run before you retry.
+
+**Stop running in background** in the same place uninstalls the service, and
+the app goes back to running agents itself. Projects and threads are kept.
+
+The app does not change how the service listens on the network. To reach the
+service from your other devices, turn on **Tailscale HTTPS** in
+**Settings → Connections** ([details](./remote-access.md#tailscale-https)).
+
 ## Platform support
 
 Linux needs systemd user services. Setup enables lingering so T3 Code starts at
