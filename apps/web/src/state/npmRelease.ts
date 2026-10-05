@@ -1,5 +1,5 @@
 import { useAtomValue } from "@effect/atom-react";
-import { npmReleaseDatabaseMigration } from "@t3tools/shared/cliRelease";
+import { cliReleaseApiUrl, npmReleaseDatabaseMigration } from "@t3tools/shared/cliRelease";
 import * as Effect from "effect/Effect";
 import { FetchHttpClient, HttpClient, HttpClientResponse } from "effect/http";
 import { AsyncResult, Atom } from "effect/reactivity";
@@ -42,10 +42,27 @@ export const npmReleaseAtom = Atom.family((spec: string) =>
   ).pipe(Atom.withRefresh("5 minutes"), Atom.withLabel(`npm-release:${spec}`)),
 );
 
+/** Servers update from this fork's GitHub Releases, so "published" means that release exists. */
 export const npmReleasePublishedAtom = Atom.family((version: string) =>
-  Atom.make((get) =>
-    get.result(npmReleaseAtom(version)).pipe(Effect.map((release) => release?.version === version)),
-  ).pipe(Atom.keepAlive, Atom.withLabel(`npm-release-published:${version}`)),
+  Atom.make(
+    Effect.gen(function* () {
+      const response = yield* HttpClient.get(cliReleaseApiUrl(version));
+      if (response.status === 404) return false;
+      const body = yield* HttpClientResponse.filterStatusOk(response).pipe(
+        Effect.flatMap((ok) => ok.json),
+      );
+      return typeof body === "object" && body !== null && "tag_name" in body
+        ? body.tag_name === `v${version}`
+        : false;
+    }).pipe(
+      Effect.provideService(HttpClient.TracerPropagationEnabled, false),
+      Effect.provide(FetchHttpClient.layer),
+    ),
+  ).pipe(
+    Atom.withRefresh("5 minutes"),
+    Atom.keepAlive,
+    Atom.withLabel(`npm-release-published:${version}`),
+  ),
 );
 
 const NO_VERSION_ATOM = Atom.make(AsyncResult.success(false)).pipe(
