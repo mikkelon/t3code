@@ -2,8 +2,6 @@ import {
   BearerConnectionCredential,
   BearerConnectionProfile,
   BearerConnectionRegistration,
-  RelayConnectionRegistration,
-  RelayConnectionTarget,
   BearerConnectionTarget,
 } from "@t3tools/client-runtime/connection";
 import {
@@ -48,19 +46,13 @@ function migrateConnection(
   document: ConnectionCatalogDocument,
   connection: typeof LegacySavedRemoteConnection.Type,
 ): ConnectionCatalogDocument {
-  if (isRelayManaged(connection)) {
-    return registerConnectionInCatalog(
-      document,
-      new RelayConnectionRegistration({
-        target: new RelayConnectionTarget({
-          environmentId: connection.environmentId,
-          label: connection.environmentLabel,
-        }),
-      }),
-    );
-  }
-
-  if (connection.bearerToken === null || connection.bearerToken.trim() === "") {
+  // T3 Connect connections authenticated through the relay, which this build
+  // does not support, so they are dropped rather than migrated.
+  if (
+    isRelayManaged(connection) ||
+    connection.bearerToken === null ||
+    connection.bearerToken.trim() === ""
+  ) {
     return document;
   }
 
