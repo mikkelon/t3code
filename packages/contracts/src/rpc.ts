@@ -368,6 +368,7 @@ import {
   ListTextGeneratorModelsResult,
   TextGeneratorError,
 } from "./settings.ts";
+import { TailscaleServeError, TailscaleServeInput, TailscaleServeState } from "./remoteAccess.ts";
 import {
   ScheduledTaskDeleteInput,
   ScheduledTaskDeleteResult,
@@ -524,6 +525,8 @@ export const WS_METHODS = {
   peerLinksUnlink: "peerLinks.unlink",
   peerLinksAnswerRequest: "peerLinks.answerRequest",
   serverUpdateSettings: "server.updateSettings",
+  serverGetTailscaleServe: "server.getTailscaleServe",
+  serverSetTailscaleServe: "server.setTailscaleServe",
   serverDiscoverSourceControl: "server.discoverSourceControl",
   serverCheckSecretSource: "server.checkSecretSource",
   serverSearchAcpRegistry: "server.searchAcpRegistry",
@@ -871,6 +874,18 @@ const WsServerUpdateSettingsRpc = Rpc.make(WS_METHODS.serverUpdateSettings, {
   }),
   success: ServerSettings,
   error: Schema.Union([ServerSettingsError, EnvironmentAuthorizationError]),
+});
+
+const WsServerGetTailscaleServeRpc = Rpc.make(WS_METHODS.serverGetTailscaleServe, {
+  payload: Schema.Struct({}),
+  success: TailscaleServeState,
+  error: EnvironmentAuthorizationError,
+});
+
+const WsServerSetTailscaleServeRpc = Rpc.make(WS_METHODS.serverSetTailscaleServe, {
+  payload: TailscaleServeInput,
+  success: TailscaleServeState,
+  error: Schema.Union([TailscaleServeError, EnvironmentAuthorizationError]),
 });
 
 const WsServerDiscoverSourceControlRpc = Rpc.make(WS_METHODS.serverDiscoverSourceControl, {
@@ -2138,6 +2153,8 @@ export const WsRpcGroup = RpcGroup.make(
   WsPeerLinksLinkRpc,
   WsPeerLinksUnlinkRpc,
   WsPeerLinksAnswerRequestRpc,
+  WsServerGetTailscaleServeRpc,
+  WsServerSetTailscaleServeRpc,
   WsServerDiscoverSourceControlRpc,
   WsServerCheckSecretSourceRpc,
   WsServerSearchAcpRegistryRpc,
