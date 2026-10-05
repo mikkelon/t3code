@@ -22,10 +22,10 @@ restart from the update button when you are ready. A server still restarting
 finishes on its own, and the button keeps showing it after the desktop app
 restarts.
 
-Server updates appear only after that version is published to npm. Remote
-desktop apps do not wait for npm. The confirmation lists each machine it skips
-and why, such as a machine that is offline or needs a manual update. Use
-**Settings → Environments** for those.
+Server updates appear only after that version's release is published on this
+fork's GitHub Releases. Remote desktop apps do not wait for it. The confirmation
+lists each machine it skips and why, such as a machine that is offline or needs
+a manual update. Use the notice or **Settings → Environments** for those.
 
 If a desktop app restarts on its old version, T3 Code tells you the update did
 not apply. It does not install that version again on its own, even when another
@@ -94,9 +94,10 @@ asks before restarting the background service; if you decline, run
 stop it and start it again afterwards with your usual options such as `--host`
 or `--tailscale-serve`.
 
-If you run the server with `npx` rather than an installed `t3`, there is
-nothing to update on the host: stop the server and relaunch it as
-`npx t3@<client-version>` with the same subcommand and options.
+This fork publishes only stable releases, versioned `<core>-mk.<n>` (for
+example `0.0.46-mk.2`), and no npm package: `npx t3` runs upstream T3 Code. The
+nightly channel (`t3 update --channel nightly`, or **Nightly** as the desktop
+app's **Update track**) has nothing to install.
 
 ## If an update fails
 
@@ -139,9 +140,11 @@ status and refresh it again.
 
 To update an environment from your phone, open **Settings → Environments** and
 select it. **Check for updates** finds the latest release on that environment's
-current release channel. Keep the app open while the environment updates and
-reconnects. Hosts that cannot update remotely show instructions for updating on
-the machine instead.
+current release channel. The store app looks up upstream's releases, which a
+server running this fork cannot install; update those with `t3 update` on the
+host or from a web or desktop client instead. Keep the app open while the
+environment updates and reconnects. Hosts that cannot update remotely show
+instructions for updating on the machine instead.
 
 The same page lets you refresh provider status and update supported providers.
 These controls require a connected environment and permission to operate it.
