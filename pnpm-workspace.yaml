@@ -24,9 +24,6 @@ allowBuilds:
 
 catalog:
   "@clerk/backend": 3.18.1
-  "@clerk/clerk-js": 6.32.1
-  "@clerk/electron": 0.0.44
-  "@clerk/electron-passkeys": 0.0.3
   "@clerk/shared": 4.33.0
   "@effect/atom-react": 4.0.1
   "@effect/openapi-generator": 4.0.1
@@ -60,8 +57,6 @@ minimumReleaseAgeExclude:
   - expo-blur@58.0.3
   - expo-audio@58.0.4
   - "@clerk/backend@3.18.1"
-  - "@clerk/clerk-js@6.32.1"
-  - "@clerk/electron@0.0.44"
   - "@clerk/shared@4.33.0"
   - "@distilled.cloud/aws@1.0.0-rc.13"
   - "@distilled.cloud/axiom@1.0.0-rc.13"
@@ -186,15 +181,6 @@ overrides:
   # pins are also the bulk of our open dependency advisories.
   "alchemy>@prisma/dev": "-"
   "@clerk/backend": "catalog:"
-  "@clerk/clerk-js": "catalog:"
-  "@clerk/clerk-js>@base-org/account": "-"
-  "@clerk/clerk-js>@coinbase/wallet-sdk": "-"
-  "@clerk/clerk-js>@solana/wallet-adapter-base": "-"
-  "@clerk/clerk-js>@solana/wallet-adapter-react": "-"
-  "@clerk/clerk-js>@solana/wallet-standard": "-"
-  "@clerk/clerk-js>@wallet-standard/core": "-"
-  "@clerk/electron": "catalog:"
-  "@clerk/electron-passkeys": "catalog:"
   "@clerk/shared": "catalog:"
   "@effect/atom-react": "catalog:"
   "@effect/platform-node": "catalog:"

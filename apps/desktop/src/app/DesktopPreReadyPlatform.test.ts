@@ -155,12 +155,13 @@ describe("DesktopPreReadyPlatform", () => {
   });
 
   it.effect(
-    "acquires a synchronous pre-ready layer before an asynchronous Clerk-shaped layer",
+    "acquires a synchronous pre-ready layer before an asynchronous single-instance-shaped layer",
     () =>
       Effect.gen(function* () {
-        class ClerkShaped extends Context.Service<ClerkShaped, { readonly ready: true }>()(
-          "@t3tools/desktop/app/DesktopPreReadyPlatform.test/ClerkShaped",
-        ) {}
+        class SingleInstanceShaped extends Context.Service<
+          SingleInstanceShaped,
+          { readonly ready: true }
+        >()("@t3tools/desktop/app/DesktopPreReadyPlatform.test/SingleInstanceShaped") {}
 
         const events: Array<string> = [];
         registerSchemesMock.mockImplementation(() => {
@@ -171,34 +172,34 @@ describe("DesktopPreReadyPlatform", () => {
           Layer.provide(Layer.succeed(HostProcessPlatform, "darwin")),
         );
 
-        const layerClerkShaped = Layer.effect(
-          ClerkShaped,
+        const layerSingleInstanceShaped = Layer.effect(
+          SingleInstanceShaped,
           Effect.promise(() => Promise.resolve()).pipe(
             Effect.map(() => {
-              events.push("clerk");
+              events.push("single-instance");
               return { ready: true as const };
             }),
           ),
         );
 
-        const layerRuntime = layerClerkShaped.pipe(
-          Layer.flatMap((clerkContext) => Layer.succeedContext(clerkContext)),
+        const layerRuntime = layerSingleInstanceShaped.pipe(
+          Layer.flatMap((singleInstanceContext) => Layer.succeedContext(singleInstanceContext)),
           Layer.provideMerge(layerPreReady),
         );
 
         const result = yield* Effect.all({
-          clerk: ClerkShaped,
+          singleInstance: SingleInstanceShaped,
           preReady: DesktopPreReadyPlatform.DesktopPreReadyElectronOptions,
         }).pipe(Effect.provide(layerRuntime));
 
         assert.deepEqual(result, {
-          clerk: { ready: true },
+          singleInstance: { ready: true },
           preReady: {
             linux: null,
             linuxPasswordStoreCommandLine: null,
           },
         });
-        assert.deepEqual(events, ["pre-ready", "clerk"]);
+        assert.deepEqual(events, ["pre-ready", "single-instance"]);
         assert.equal(registerSchemesMock.mock.calls.length, 1);
         assert.equal(appendSwitchMock.mock.calls.length, 0);
         assert.equal(setDesktopNameMock.mock.calls.length, 0);

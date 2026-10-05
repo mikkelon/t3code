@@ -1,10 +1,8 @@
-import { createClerkBridge } from "@clerk/electron";
-import { storage } from "@clerk/electron/storage";
+import * as Electron from "electron";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
-import * as Schema from "effect/Schema";
 import * as Scope from "effect/Scope";
 
 import { codexAuthDeliveryUrl, readCodexAuthHandoff } from "@t3tools/shared/codexAuthHandoff";
@@ -12,43 +10,14 @@ import { receiveCodexAuthCallback, CodexAuthCallbackError } from "./CodexAuthCal
 import * as ElectronShell from "../electron/ElectronShell.ts";
 import { providerAuthReturnUrl } from "@t3tools/shared/providerAuthReturnUrl";
 import { HostProcessArguments } from "@t3tools/shared/hostProcess";
-import { clerkFrontendApiHostnameFromPublishableKey } from "@t3tools/shared/relayAuth";
 import * as ElectronApp from "../electron/ElectronApp.ts";
 import * as ElectronProtocol from "../electron/ElectronProtocol.ts";
 import * as ElectronWindow from "../electron/ElectronWindow.ts";
 import * as DesktopUserData from "./DesktopUserData.ts";
 import * as DesktopEnvironment from "./DesktopEnvironment.ts";
 
-declare const __T3CODE_BUILD_CLERK_PUBLISHABLE_KEY__: string | undefined;
-
-export class DesktopClerkBridgeInitializationError extends Schema.TaggedError<DesktopClerkBridgeInitializationError>()(
-  "DesktopClerkBridgeInitializationError",
-  {
-    stateDir: Schema.String,
-    isDevelopment: Schema.Boolean,
-    cause: Schema.Defect(),
-  },
-) {
-  override get message(): string {
-    return `Failed to initialize the desktop Clerk bridge for state directory "${this.stateDir}" (development: ${this.isDevelopment}).`;
-  }
-}
-
-export class DesktopClerkBridgeCleanupError extends Schema.TaggedError<DesktopClerkBridgeCleanupError>()(
-  "DesktopClerkBridgeCleanupError",
-  {
-    stateDir: Schema.String,
-    isDevelopment: Schema.Boolean,
-    cause: Schema.Defect(),
-  },
-) {
-  override get message(): string {
-    return `Failed to clean up the desktop Clerk bridge for state directory "${this.stateDir}" (development: ${this.isDevelopment}).`;
-  }
-}
-
-export class DesktopClerk extends Context.Service<
-  DesktopClerk,
+export class DesktopSingleInstance extends Context.Service<
+  DesktopSingleInstance,
   {
     readonly configure: Effect.Effect<
       void,
@@ -56,36 +25,16 @@ export class DesktopClerk extends Context.Service<
       ElectronApp.ElectronApp | ElectronWindow.ElectronWindow | Scope.Scope
     >;
   }
->()("@t3tools/desktop/app/DesktopClerk") {}
+>()("@t3tools/desktop/app/DesktopSingleInstance") {}
 
-function resolveDesktopClerkFrontendApiHostname(
-  publishableKey: string | undefined,
-): string | undefined {
-  const normalizedKey = publishableKey?.trim();
-  if (!normalizedKey) return undefined;
-
-  try {
-    return clerkFrontendApiHostnameFromPublishableKey(normalizedKey);
-  } catch {
-    return undefined;
-  }
-}
-
-export const desktopClerkFrontendApiHostname = resolveDesktopClerkFrontendApiHostname(
-  typeof __T3CODE_BUILD_CLERK_PUBLISHABLE_KEY__ === "undefined"
-    ? undefined
-    : __T3CODE_BUILD_CLERK_PUBLISHABLE_KEY__,
-);
-
-function createDesktopClerkBridge(stateDir: string, isDevelopment: boolean) {
-  return createClerkBridge({
-    storage: storage({ path: stateDir }),
-    passkeys: true,
-    renderer: {
-      scheme: ElectronProtocol.getDesktopScheme(isDevelopment),
-      host: ElectronProtocol.DESKTOP_HOST,
-    },
-  });
+/**
+ * Takes Electron's profile-scoped single-instance lock so deep links on
+ * Windows and Linux reach the running app as `second-instance`. macOS
+ * delivers them to the running app as `open-url` without a lock.
+ */
+function acquireSingleInstanceLock(platform: NodeJS.Platform): "unlocked" | "locked" | "secondary" {
+  if (platform === "darwin") return "unlocked";
+  return Electron.app.requestSingleInstanceLock() ? "locked" : "secondary";
 }
 
 /** @public Service construction is part of the canonical Effect module API. */
@@ -94,46 +43,36 @@ export const make = Effect.gen(function* () {
   const electronApp = yield* ElectronApp.ElectronApp;
   const shell = yield* ElectronShell.ElectronShell;
 
-  // The SDK bridge acquires Electron's profile-scoped single-instance lock.
-  // Must not yield: the bridge registers a scheme Electron rejects once ready.
+  // The lock both lives in and creates the userData directory, so the real
+  // path must be set first. Must not yield: deep links can arrive as soon as
+  // Electron is ready.
   const userDataPath = yield* DesktopUserData.resolveUserDataPath(environment);
   yield* electronApp.setPath("userData", userDataPath);
 
-  const bridge = yield* Effect.acquireRelease(
-    Effect.try({
-      try: () => createDesktopClerkBridge(environment.stateDir, environment.isDevelopment),
-      catch: (cause) =>
-        new DesktopClerkBridgeInitializationError({
-          stateDir: environment.stateDir,
-          isDevelopment: environment.isDevelopment,
-          cause,
-        }),
-    }),
-    (bridge) =>
-      Effect.try({
-        try: () => bridge.cleanup(),
-        catch: (cause) =>
-          new DesktopClerkBridgeCleanupError({
-            stateDir: environment.stateDir,
-            isDevelopment: environment.isDevelopment,
-            cause,
-          }),
-      }).pipe(Effect.orDie),
+  const lock = yield* Effect.acquireRelease(
+    Effect.sync(() => acquireSingleInstanceLock(environment.platform)),
+    (lock) =>
+      lock === "locked" ? Effect.sync(() => Electron.app.releaseSingleInstanceLock()) : Effect.void,
   );
+  const isPrimaryInstance = lock !== "secondary";
+  if (isPrimaryInstance) {
+    // Route t3code:// links (provider sign-in returns) to this app.
+    yield* electronApp.setAsDefaultProtocolClient(
+      ElectronProtocol.getDesktopScheme(environment.isDevelopment),
+    );
+  }
 
-  return DesktopClerk.of({
+  return DesktopSingleInstance.of({
     configure: Effect.gen(function* () {
       const electronApp = yield* ElectronApp.ElectronApp;
       const electronWindow = yield* ElectronWindow.ElectronWindow;
       const context = yield* Effect.context<ElectronWindow.ElectronWindow>();
       const runPromise = Effect.runPromiseWith(context);
 
-      // The SDK bridge holds Electron's single-instance lock (acquired at
-      // bridge creation) so OAuth deep-link callbacks on Windows/Linux are
-      // forwarded to the running app. In a secondary instance the bridge has
-      // already begun quitting the app; app.quit() is asynchronous, so stop
-      // bootstrap here before whenReady can fire.
-      if (!bridge.isPrimaryInstance) {
+      // A secondary instance hands its arguments to the running app through
+      // `second-instance`. app.quit() is asynchronous, so stop bootstrap here
+      // before whenReady can fire.
+      if (!isPrimaryInstance) {
         yield* electronApp.quit;
         return yield* Effect.interrupt;
       }
@@ -197,8 +136,8 @@ export const make = Effect.gen(function* () {
           }),
         );
       });
-    }).pipe(Effect.withSpan("desktop.clerk.configure")),
+    }).pipe(Effect.withSpan("desktop.single_instance.configure")),
   });
 });
 
-export const layer = Layer.effect(DesktopClerk, make);
+export const layer = Layer.effect(DesktopSingleInstance, make);
