@@ -259,6 +259,11 @@ DMGs default to the host architecture. Use `--arch` to choose another target and
 to retain packaging files for inspection. Run `vp run dist:desktop:artifact --help` for other
 options.
 
+A Linux or macOS build only installs and updates the background service when it ships a service
+runtime: pass this platform's CLI archive (`scripts/build-cli-archive.ts`, same version and
+architecture) as `--service-runtime`. The fork's release workflow does; a build without it runs
+agents inside the app as before.
+
 ### Prepared server bytecode
 
 Native macOS and Windows desktop artifact builds generate server bytecode with the packaged

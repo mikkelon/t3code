@@ -385,7 +385,9 @@ export const runUpdate = Effect.fn("cli.update.run")(function* (input: {
   const serviceCurrent =
     !serviceInstalled ||
     (serviceVersion === targetVersion &&
-      (executableCurrent ? status.current : (status.problems ?? []).length === 0));
+      (executableCurrent
+        ? status.current
+        : (status.problems ?? []).every(BootService.isBootServiceWarning)));
   const newestInstalled =
     serviceVersion !== undefined && compareExactServiceVersions(serviceVersion, currentVersion) > 0
       ? serviceVersion

@@ -18,7 +18,8 @@ import { AsyncResult, Atom } from "effect/reactivity";
 
 import { environmentCatalog } from "../connection/catalog";
 import { connectionAtomRuntime } from "../connection/runtime";
-import { environmentShell } from "./shell";
+import { primaryEnvironmentIdAtom } from "./primaryEnvironment";
+import { environmentShell, environmentSnapshotAtom } from "./shell";
 
 export const threadFamilies = createThreadFamilyAtoms(
   connectionAtomRuntime,
@@ -129,3 +130,16 @@ export const runningThreadKeepAliveAtom = createRunningThreadKeepAliveAtom({
   threadsAtom: environmentThreadShells.environmentThreadsAtom,
   stateAtom: environmentThreads.stateAtom,
 });
+
+/**
+ * Running threads on the primary environment, or null until its threads have
+ * loaded. The desktop app waits for none before it switches its background
+ * service to a new version.
+ */
+export const primaryRunningThreadCountAtom = Atom.make((get): number | null => {
+  const environmentId = get(primaryEnvironmentIdAtom);
+  if (environmentId === null || get(environmentSnapshotAtom(environmentId)) === null) return null;
+  return get(environmentThreadShells.environmentThreadsAtom(environmentId)).filter((thread) =>
+    isRunning(thread.status),
+  ).length;
+}).pipe(Atom.withLabel("web-primary-running-thread-count"));

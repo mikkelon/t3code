@@ -5,6 +5,7 @@ import * as Console from "effect/Console";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
+import * as Option from "effect/Option";
 import * as Path from "effect/Path";
 import { Command, Flag, GlobalFlag, Prompt } from "effect/cli";
 import { FetchHttpClient } from "effect/http";
@@ -85,10 +86,12 @@ export const writeServiceEnv = Effect.fn("cli.service.write_env")(function* (
   yield* fs.writeFileString(current.path, next);
 });
 
-export const reconcileService = Effect.fn("cli.service.reconcile")(function* (options?: {
-  readonly allowDowngrade?: boolean;
-  readonly start?: boolean;
-}) {
+export const reconcileService = Effect.fn("cli.service.reconcile")(function* (
+  options?: BootService.BootServiceRuntimeOptions & {
+    readonly allowDowngrade?: boolean;
+    readonly start?: boolean;
+  },
+) {
   const { baseDir } = yield* ServerConfig.ServerConfig;
   const service = yield* BootService.BootService;
   const status = yield* service.status;
@@ -182,6 +185,14 @@ function formatServiceStatus(
   ].join("\n");
 }
 
+/** Problems that leave the service working, such as a missing linger. */
+const logServiceWarnings = Effect.gen(function* () {
+  const status = yield* (yield* BootService.BootService).status;
+  for (const problem of (status.problems ?? []).filter(BootService.isBootServiceWarning)) {
+    yield* Console.log(`Warning: [${problem}] ${BootService.formatBootServiceProblem(problem)}`);
+  }
+});
+
 const runServiceCommand = Effect.fn("cli.service.run")(function* <A, E, R>(
   flags: { readonly baseDir: Parameters<typeof resolveCliAuthConfig>[0]["baseDir"] },
   run: Effect.Effect<A, E, R>,
@@ -199,7 +210,23 @@ const serviceReconcileFlags = {
   ),
 };
 
-const serviceInstallCommand = Command.make("install", serviceReconcileFlags).pipe(
+const runtimeArchiveFlag = Flag.String("runtime-archive").pipe(
+  Flag.withDescription(
+    "Unpack this t3 release archive for this version instead of downloading it, for example the one the desktop app ships.",
+  ),
+  Flag.optional,
+);
+
+const serviceInstallCommand = Command.make("install", {
+  ...serviceReconcileFlags,
+  runtimeArchive: runtimeArchiveFlag,
+  noStart: Flag.Boolean("no-start").pipe(
+    Flag.withDescription(
+      "Prepare the runtime and unit without starting the service; `t3 service start` starts it.",
+    ),
+    Flag.withDefault(false),
+  ),
+}).pipe(
   Command.withDescription(
     "Install T3 Code as a background service for this user. `t3 up` also chooses how your other devices reach it.",
   ),
@@ -207,17 +234,22 @@ const serviceInstallCommand = Command.make("install", serviceReconcileFlags).pip
     runServiceCommand(
       flags,
       Effect.gen(function* () {
-        const result = yield* reconcileService({ allowDowngrade: flags.allowDowngrade });
+        const result = yield* reconcileService({
+          allowDowngrade: flags.allowDowngrade,
+          runtimeArchive: Option.getOrUndefined(flags.runtimeArchive),
+          ...(flags.noStart ? { start: false } : {}),
+        });
         if (!result.changed) {
           yield* Console.log(
             `T3 Code service is already installed with t3@${packageJson.version} (${yield* resolveEntryPath}).`,
           );
-          return;
+        } else {
+          yield* Console.log(formatServiceChange(result));
+          if (!result.previouslyInstalled) {
+            yield* Console.log("Run `t3 up` to choose how your other devices reach it.");
+          }
         }
-        yield* Console.log(formatServiceChange(result));
-        if (!result.previouslyInstalled) {
-          yield* Console.log("Run `t3 up` to choose how your other devices reach it.");
-        }
+        yield* logServiceWarnings;
       }),
     ),
   ),
@@ -246,6 +278,26 @@ const serviceUpdateCommand = Command.make("update", serviceReconcileFlags).pipe(
   ),
 );
 
+const serviceStageCommand = Command.make("stage", {
+  ...projectLocationFlags,
+  runtimeArchive: runtimeArchiveFlag,
+}).pipe(
+  Command.withDescription(
+    "Put this t3 version under the T3 home's runtime without touching the service, so switching the service to it later needs no download.",
+  ),
+  Command.withHandler((flags) =>
+    runServiceCommand(
+      flags,
+      Effect.gen(function* () {
+        const runtime = yield* (yield* BootService.BootService).stage({
+          runtimeArchive: Option.getOrUndefined(flags.runtimeArchive),
+        });
+        yield* Console.log(`Staged t3@${packageJson.version} at ${runtime.versionDir}.`);
+      }),
+    ),
+  ),
+);
+
 const serviceRestartCommand = Command.make("restart", projectLocationFlags).pipe(
   Command.withDescription(
     "Restart the background service. Picks up a version installed by `t3 update` that was not restarted at the time.",
@@ -265,6 +317,22 @@ const serviceRestartCommand = Command.make("restart", projectLocationFlags).pipe
             : outcome === "queued"
               ? `Queued a restart of the T3 Code service${onVersion}. This session runs inside the service and disconnects when it goes down.\nLogs: ${status.logPath}`
               : "T3 Code service is not installed.",
+        );
+      }),
+    ),
+  ),
+);
+
+const serviceStartCommand = Command.make("start", projectLocationFlags).pipe(
+  Command.withDescription("Start the installed background service if it is not running."),
+  Command.withHandler((flags) =>
+    runServiceCommand(
+      flags,
+      Effect.gen(function* () {
+        const service = yield* BootService.BootService;
+        const started = yield* service.start;
+        yield* Console.log(
+          started ? "Started the T3 Code service." : "T3 Code service is not installed.",
         );
       }),
     ),
@@ -422,6 +490,8 @@ export const serviceCommand = Command.make("service").pipe(
   Command.withSubcommands([
     serviceInstallCommand,
     serviceRestartCommand,
+    serviceStageCommand,
+    serviceStartCommand,
     serviceUninstallCommand,
     serviceStatusCommand,
     serviceProtectCommand,
