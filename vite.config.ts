@@ -103,8 +103,8 @@ export default defineConfig({
     hookTimeout: 60_000,
     testTimeout: 60_000,
     allowOnly: !process.env.CI,
-    // Flaky tests are fixed, not retried.
-    retry: 0,
+    // Flaky tests are fixed, not retried. Fork CI sets T3CODE_CI_TEST_RETRY for its small runners.
+    retry: Number(process.env.T3CODE_CI_TEST_RETRY ?? 0),
     fakeTimers: {
       toFake: [
         "setTimeout",
