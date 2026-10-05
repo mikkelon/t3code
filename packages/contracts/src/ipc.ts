@@ -358,6 +358,9 @@ export interface DesktopEnvironmentBootstrap {
   httpBaseUrl: string | null;
   wsBaseUrl: string | null;
   bootstrapToken?: string;
+  // The primary is the background service (`t3 service`) the app adopted
+  // instead of running its own backend. Closing the app leaves it running.
+  backgroundService?: boolean;
 }
 
 export const DesktopEnvironmentBootstrapSchema = Schema.Struct({
@@ -367,7 +370,34 @@ export const DesktopEnvironmentBootstrapSchema = Schema.Struct({
   httpBaseUrl: Schema.NullOr(Schema.String),
   wsBaseUrl: Schema.NullOr(Schema.String),
   bootstrapToken: Schema.optionalKey(Schema.String),
+  backgroundService: Schema.optionalKey(Schema.Boolean),
 });
+
+export const DesktopBackgroundServiceStateSchema = Schema.Struct({
+  // Linux or macOS with a published runtime, outside development.
+  supported: Schema.Boolean,
+  // Installed for this app's T3 home.
+  installed: Schema.Boolean,
+  // The local environment is the background service instead of a backend
+  // the app runs itself.
+  adopted: Schema.Boolean,
+});
+export type DesktopBackgroundServiceState = typeof DesktopBackgroundServiceStateSchema.Type;
+
+export const DesktopBackgroundServiceInstallResultSchema = Schema.Union([
+  // Installed; the app restarts and hands over to the service.
+  Schema.Struct({ _tag: Schema.Literal("Installed") }),
+  // Lingering needs administrator rights. Run `command`, then retry.
+  Schema.Struct({ _tag: Schema.Literal("NeedsLinger"), command: Schema.String }),
+]);
+export type DesktopBackgroundServiceInstallResult =
+  typeof DesktopBackgroundServiceInstallResultSchema.Type;
+
+export const DesktopAgentActivitySchema = Schema.Struct({
+  running: Schema.Int,
+  continuesAfterRestart: Schema.Boolean,
+});
+export type DesktopAgentActivity = typeof DesktopAgentActivitySchema.Type;
 
 export const DesktopSshEnvironmentTargetSchema = Schema.Struct({
   alias: Schema.String,
@@ -1114,6 +1144,13 @@ export interface DesktopBridge {
   getLocalEnvironmentEnabled?: () => boolean;
   setLocalEnvironmentEnabled?: (enabled: boolean) => Promise<void>;
   getLocalEnvironmentBearerToken: () => Promise<string>;
+  getBackgroundServiceState?: () => Promise<DesktopBackgroundServiceState>;
+  // On success the app restarts on the background service.
+  installBackgroundService?: () => Promise<DesktopBackgroundServiceInstallResult>;
+  // The app restarts on its own backend; projects and threads are kept.
+  uninstallBackgroundService?: () => Promise<void>;
+  // Running turns on the primary environment, for the quit prompt.
+  reportAgentActivity?: (activity: DesktopAgentActivity) => Promise<void>;
   getClientSettings: () => Promise<ClientSettings | null>;
   setClientSettings: (settings: ClientSettings) => Promise<void>;
   getConnectionCatalog?: () => Promise<string | null>;
