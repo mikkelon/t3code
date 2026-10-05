@@ -10,6 +10,7 @@ interface CachedTestTask {
   cache:
     | false
     | {
+        env?: Array<string>;
         input: Array<string | { auto: true }>;
         output: Array<string>;
       };
@@ -100,6 +101,8 @@ export function cachedTestTasks(
         cache: uncached.includes(group[0]!)
           ? false
           : {
+              // Fork CI's retry count for its small runners (see .github/workflows/ci.yml).
+              env: ["T3CODE_CI_TEST_RETRY"],
               // Vitest reads and rewrites these caches while running otherwise unchanged tests.
               input: [
                 { auto: true },
