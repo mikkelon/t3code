@@ -7,6 +7,7 @@ import * as NodePath from "node:path";
 import { assert, describe, it } from "@effect/vitest";
 import * as NodeCrypto from "@effect/platform-node/NodeCrypto";
 import * as NodeServices from "@effect/platform-node/NodeServices";
+import { CLI_RELEASE_REPOSITORY } from "@t3tools/shared/cliRelease";
 import * as NetService from "@t3tools/shared/Net";
 import * as Clock from "effect/Clock";
 import * as Deferred from "effect/Deferred";
@@ -163,6 +164,20 @@ const localRemoteShellLayer = (home: string) =>
   );
 
 describe("ssh tunnel scripts", () => {
+  it("downloads the release archive from the fork's releases, including -mk versions", () => {
+    const script = SshTunnel.buildRemoteT3RunnerScript(ARCHIVE);
+
+    assert.include(
+      script,
+      `T3_RELEASE_BASE_URL='https://github.com/${CLI_RELEASE_REPOSITORY}/releases/download'`,
+    );
+    // Fork releases are <core>-mk.<n>.
+    assert.include(
+      SshTunnel.buildRemoteT3RunnerScript({ archiveVersion: "0.0.46-mk.1" }),
+      "T3_ARCHIVE_VERSION='0.0.46-mk.1'",
+    );
+  });
+
   it("rejects archive versions that are not a single exact version segment", () => {
     for (const archiveVersion of [
       "../other",
