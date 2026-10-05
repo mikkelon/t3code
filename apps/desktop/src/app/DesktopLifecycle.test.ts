@@ -12,6 +12,7 @@ import * as ElectronWindow from "../electron/ElectronWindow.ts";
 import * as DesktopEnvironment from "./DesktopEnvironment.ts";
 import * as DesktopLifecycle from "./DesktopLifecycle.ts";
 import * as DesktopShutdown from "./DesktopShutdown.ts";
+import * as DesktopBackgroundService from "../backend/DesktopBackgroundService.ts";
 import * as DesktopState from "./DesktopState.ts";
 import * as DesktopWindow from "../window/DesktopWindow.ts";
 
@@ -125,6 +126,7 @@ describe("DesktopLifecycle", () => {
         Layer.provideMerge(environmentLayer),
         Layer.provideMerge(DesktopShutdown.layer),
         Layer.provideMerge(DesktopState.layer),
+        Layer.provideMerge(DesktopBackgroundService.layerTest()),
       );
 
       return Effect.scoped(
@@ -197,6 +199,7 @@ describe("DesktopLifecycle", () => {
         Layer.provideMerge(environmentLayer),
         Layer.provideMerge(desktopShutdownLayer),
         Layer.provideMerge(DesktopState.layer),
+        Layer.provideMerge(DesktopBackgroundService.layerTest()),
       );
 
       yield* Effect.scoped(
@@ -238,6 +241,7 @@ describe("DesktopLifecycle", () => {
         Layer.provideMerge(environmentLayer),
         Layer.provideMerge(DesktopShutdown.layer),
         Layer.provideMerge(DesktopState.layer),
+        Layer.provideMerge(DesktopBackgroundService.layerTest()),
       );
 
       yield* Effect.scoped(

@@ -18,6 +18,7 @@ import * as DesktopClerk from "./DesktopClerk.ts";
 import * as DesktopApplicationMenu from "../window/DesktopApplicationMenu.ts";
 import * as DesktopWindow from "../window/DesktopWindow.ts";
 import * as DesktopBackendPool from "../backend/DesktopBackendPool.ts";
+import * as DesktopBackgroundService from "../backend/DesktopBackgroundService.ts";
 import * as DesktopEnvironment from "./DesktopEnvironment.ts";
 import * as DesktopLegacyLocalStorage from "./DesktopLegacyLocalStorage.ts";
 import * as DesktopLifecycle from "./DesktopLifecycle.ts";
@@ -159,6 +160,37 @@ export const stopAllPoolInstances = Effect.fn("desktop.app.stopAllPoolInstances"
   },
 );
 
+// A T3 server already owns this home, or the background service is installed
+// for it: adopt that server instead of embedding a second backend on the same
+// database. Resolves false when nothing owns the home after all.
+const bootstrapAdoptedLocalEnvironment = Effect.fn("desktop.bootstrap.adoptLocalEnvironment")(
+  function* (decision: DesktopBackgroundService.LocalServerDecision) {
+    const state = yield* DesktopState.DesktopState;
+    const backgroundService = yield* DesktopBackgroundService.DesktopBackgroundService;
+    const outcome = yield* backgroundService.adopt(decision);
+    if (outcome === "embed") return false;
+    if (outcome === "quit") {
+      yield* Ref.set(state.quitting, true);
+      yield* (yield* DesktopShutdown.DesktopShutdown).request;
+      yield* (yield* ElectronApp.ElectronApp).quit;
+      return true;
+    }
+    const adopted = yield* backgroundService.adopted;
+    if (Option.isNone(adopted) || (yield* Ref.get(state.quitting))) return true;
+    yield* (yield* DesktopWindow.DesktopWindow).handleBackendReady(adopted.value.httpBaseUrl).pipe(
+      Effect.catch((error) =>
+        logBootstrapWarning("failed to open main window for the adopted server", {
+          error: error.message,
+        }),
+      ),
+    );
+    yield* (yield* DesktopAppActivation.DesktopAppActivation).start.pipe(
+      Effect.catch((error) => logStartupError("desktop app control socket unavailable", { error })),
+    );
+    return true;
+  },
+);
+
 const bootstrap = Effect.gen(function* () {
   const state = yield* DesktopState.DesktopState;
   const environment = yield* DesktopEnvironment.DesktopEnvironment;
@@ -193,6 +225,11 @@ const bootstrap = Effect.gen(function* () {
     if (!(yield* Ref.get(state.quitting))) {
       yield* desktopWindow.createMainIfBackendReady;
     }
+    return;
+  }
+
+  const localServer = yield* (yield* DesktopBackgroundService.DesktopBackgroundService).decide;
+  if (localServer._tag !== "Embed" && (yield* bootstrapAdoptedLocalEnvironment(localServer))) {
     return;
   }
 
@@ -344,6 +381,7 @@ const scopedProgram = Effect.scoped(
 
     const shutdown = yield* DesktopShutdown.DesktopShutdown;
     const rendererHistory = yield* DesktopRendererHistory.DesktopRendererHistory;
+    const backgroundService = yield* DesktopBackgroundService.DesktopBackgroundService;
 
     yield* Effect.addFinalizer(() =>
       // Stop every backend in the pool, not just the primary. The
@@ -352,6 +390,8 @@ const scopedProgram = Effect.scoped(
       // finalizer means it gets hard-killed by the OS instead of
       // receiving SIGTERM + grace.
       stopAllPoolInstances().pipe(
+        // Only after the embedded backend is gone, so the two never overlap.
+        Effect.andThen(backgroundService.startAfterShutdown),
         Effect.ensuring(rendererHistory.shutdown),
         Effect.ensuring(shutdown.markComplete),
       ),

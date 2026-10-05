@@ -5,6 +5,12 @@ import * as DesktopIpc from "./DesktopIpc.ts";
 import { installNotificationBadge } from "./methods/notificationBadge.ts";
 import { getClientSettings, setClientSettings } from "./methods/clientSettings.ts";
 import {
+  getBackgroundServiceState,
+  installBackgroundService,
+  reportAgentActivity,
+  uninstallBackgroundService,
+} from "./methods/backgroundService.ts";
+import {
   clearConnectionCatalog,
   getConnectionCatalog,
   setConnectionCatalog,
@@ -93,6 +99,10 @@ export const installDesktopIpcHandlers = Effect.fn("desktop.ipc.installHandlers"
   yield* ipc.handleSync(getLocalEnvironmentEnabled);
   yield* ipc.handle(setLocalEnvironmentEnabled);
   yield* ipc.handle(getLocalEnvironmentBearerToken);
+  yield* ipc.handle(getBackgroundServiceState);
+  yield* ipc.handle(installBackgroundService);
+  yield* ipc.handle(uninstallBackgroundService);
+  yield* ipc.handle(reportAgentActivity);
 
   yield* ipc.handle(getClientSettings);
   yield* ipc.handle(setClientSettings);
