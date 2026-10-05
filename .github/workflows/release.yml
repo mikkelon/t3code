@@ -1,14 +1,9 @@
 name: Release
 
+# Fork: upstream's pipeline (paid runners, npm, signing, hosted services) is
+# kept only to keep rebases clean and never triggers here. The fork releases
+# with fork-release.yml.
 on:
-  push:
-    tags:
-      - "v*.*.*"
-      - "!v*-nightly.*"
-      - "!v*-preview.*"
-  schedule:
-    # Avoid minute zero, when GitHub scheduled jobs are busiest.
-    - cron: "8,38 * * * *"
   workflow_dispatch:
     inputs:
       channel:

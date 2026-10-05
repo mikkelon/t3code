@@ -143,6 +143,11 @@ and there are no macOS or Windows desktop builds because unsigned ones cannot
 update themselves (macOS) or warn on every install (Windows). Upstream's
 `release.yml` stays in the tree, trigger-less, so rebases stay clean.
 
+If a release fails to publish, fix the workflow, then run **Fork release** with
+the same version (it rebuilds the commit the existing tag points to, using the
+workflow from the branch you run it on), or move the tag to the fixed commit
+and force-push it.
+
 Versions are `<core>-mk.<n>`, for example `0.0.46-mk.2`:
 
 - `<core>` is the version upstream's nightlies use for the same commit (the patch
