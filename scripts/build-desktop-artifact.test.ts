@@ -61,6 +61,11 @@ import {
   stageLinuxCaptureHelper,
   stageWslRuntimeArchive,
   bundlesWslRuntime,
+  bundlesServiceRuntime,
+  SERVICE_RUNTIME_EXTRA_RESOURCES,
+  ServiceRuntimeArchiveInvalidError,
+  serviceRuntimeArchiveStem,
+  stageServiceRuntimeArchive,
   STAGE_INSTALL_ARGS,
   ancestorNodeModulesPaths,
   copyDirectoryPreservingSymlinks,
@@ -552,6 +557,7 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
     // matches. Assert the invariant first, where the failure names the culprit.
     for (const resource of [
       ...WSL_RUNTIME_EXTRA_RESOURCES,
+      ...SERVICE_RUNTIME_EXTRA_RESOURCES,
       ...LINUX_BROWSER_SECRET_EXTRA_RESOURCES,
     ]) {
       assert.include(
@@ -576,6 +582,7 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
       "!apps/desktop/prod-resources/windows-server/**/*",
       "!apps/desktop/prod-resources/wsl-runtime.tar.gz",
       "!apps/desktop/prod-resources/wsl-runtime.tar.gz.sha256",
+      "!apps/desktop/prod-resources/service-runtime.tar.gz",
       "!apps/desktop/gnome-extension",
       "!apps/desktop/gnome-extension/**/*",
     ]);
@@ -619,6 +626,18 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
         undefined,
         true,
       );
+      const linuxWithServiceRuntime = yield* createBuildConfig(
+        "linux",
+        "AppImage",
+        "1.2.3",
+        false,
+        false,
+        undefined,
+        undefined,
+        false,
+        "arm64",
+        true,
+      );
       const winWithoutWslRuntime = yield* createBuildConfig(
         "win",
         "nsis",
@@ -645,6 +664,15 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
         ...DESKTOP_EXTRA_RESOURCES,
         ...LINUX_CAPTURE_EXTRA_RESOURCES,
         { from: "apps/desktop/prod-resources/browser-secret", to: "browser-secret" },
+      ]);
+      assert.deepStrictEqual(linuxWithServiceRuntime.extraResources, [
+        ...DESKTOP_EXTRA_RESOURCES,
+        ...LINUX_CAPTURE_EXTRA_RESOURCES,
+        { from: "apps/desktop/prod-resources/browser-secret", to: "browser-secret" },
+        {
+          from: "apps/desktop/prod-resources/service-runtime.tar.gz",
+          to: "service-runtime.tar.gz",
+        },
       ]);
       assert.deepStrictEqual(win.extraResources, [
         ...DESKTOP_EXTRA_RESOURCES,
@@ -2023,6 +2051,74 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
     assert.equal(wslRuntimeArchiveStem("1.2.3", "x64"), "t3-1.2.3-linux-x64");
   });
 
+  it("ships its own platform's CLI release archive as the background service runtime", () => {
+    const runtimeArchivePath = "/tmp/t3-1.2.3-linux-arm64.tar.gz";
+    assert.isTrue(bundlesServiceRuntime({ platform: "linux", runtimeArchivePath }));
+    assert.isTrue(bundlesServiceRuntime({ platform: "mac", runtimeArchivePath }));
+    assert.isFalse(bundlesServiceRuntime({ platform: "linux", runtimeArchivePath: undefined }));
+    // Windows has no background service; its archive is the WSL runtime.
+    assert.isFalse(bundlesServiceRuntime({ platform: "win", runtimeArchivePath }));
+    assert.equal(serviceRuntimeArchiveStem("1.2.3", "linux", "arm64"), "t3-1.2.3-linux-arm64");
+    assert.equal(serviceRuntimeArchiveStem("1.2.3", "mac", "arm64"), "t3-1.2.3-darwin-arm64");
+  });
+
+  it.effect("stages the background service runtime only for this version and architecture", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem;
+        const path = yield* Path.Path;
+        const root = yield* fs.makeTempDirectoryScoped({ prefix: "t3-service-runtime-stage-" });
+        const sourceArchivePath = yield* makeLinuxCliArchiveFixture({
+          root,
+          stem: "t3-1.2.3-linux-arm64",
+        });
+        const archivePath = path.join(root, "app", SERVICE_RUNTIME_EXTRA_RESOURCES[0].from);
+
+        const wrongArch = yield* stageServiceRuntimeArchive({
+          sourceArchivePath,
+          archivePath,
+          stem: serviceRuntimeArchiveStem("1.2.3", "linux", "x64"),
+        }).pipe(Effect.flip);
+        assert.instanceOf(wrongArch, ServiceRuntimeArchiveInvalidError);
+        assert.include(wrongArch.message, "t3-1.2.3-linux-x64, found t3-1.2.3-linux-arm64");
+        assert.isFalse(yield* fs.exists(archivePath));
+
+        yield* stageServiceRuntimeArchive({
+          sourceArchivePath,
+          archivePath,
+          stem: serviceRuntimeArchiveStem("1.2.3", "linux", "arm64"),
+        });
+        assert.deepStrictEqual(
+          yield* fs.readFile(archivePath),
+          yield* fs.readFile(sourceArchivePath),
+        );
+      }),
+    ),
+  );
+
+  it.effect("refuses a background service runtime without its executable", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem;
+        const path = yield* Path.Path;
+        const root = yield* fs.makeTempDirectoryScoped({ prefix: "t3-service-runtime-no-t3-" });
+        const stem = "t3-1.2.3-linux-x64";
+        const sourceArchivePath = yield* makeLinuxCliArchiveFixture({
+          root,
+          stem,
+          omitMembers: [`${stem}/t3`],
+        });
+        const error = yield* stageServiceRuntimeArchive({
+          sourceArchivePath,
+          archivePath: path.join(root, "staged.tar.gz"),
+          stem,
+        }).pipe(Effect.flip);
+        assert.instanceOf(error, ServiceRuntimeArchiveInvalidError);
+        assert.include(error.message, `${stem}/t3 is missing`);
+      }),
+    ),
+  );
+
   it("parses Windows bsdtar member listings with CRLF line endings", () => {
     assert.deepStrictEqual(
       parseWslRuntimeArchiveMembers("./t3-1.2.3-linux-x64/t3\r\nt3-1.2.3-linux-x64/client/\r\n"),
@@ -2163,6 +2259,7 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
         mockUpdates: Option.none(),
         mockUpdateServerPort: Option.none(),
         wslRuntime: Option.none(),
+        serviceRuntime: Option.none(),
       }).pipe(
         Effect.provide(
           Layer.mergeAll(
@@ -2203,6 +2300,7 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
             mockUpdates: Option.none(),
             mockUpdateServerPort: Option.none(),
             wslRuntime: Option.none(),
+            serviceRuntime: Option.none(),
           }),
         );
 
@@ -2227,6 +2325,7 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
         mockUpdates: Option.some(false),
         mockUpdateServerPort: Option.none(),
         wslRuntime: Option.none(),
+        serviceRuntime: Option.none(),
       }).pipe(
         Effect.provide(
           ConfigProvider.layer(
