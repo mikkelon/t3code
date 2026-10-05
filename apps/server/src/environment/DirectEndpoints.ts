@@ -1,7 +1,7 @@
 /**
  * DirectEndpoints - the LAN and tailnet addresses this server listens on now.
  *
- * Clients connected one way (often T3 Connect) save these as extra routes so
+ * Clients connected one way (for example over Tailscale) save these as extra routes so
  * they can move to a faster path when one is reachable, and replace a saved
  * LAN address when DHCP or a new Wi-Fi network changes it. Only addresses the
  * server is actually bound to are listed: a loopback-only server lists none,

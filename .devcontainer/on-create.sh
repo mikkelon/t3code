@@ -31,8 +31,7 @@ T3 Code devcontainer
 
   vp run dev            start server + web, then open the pairing URL it
                         prints (the bare forwarded port will not authenticate)
-  cp .env.example .env  optional: enable T3 Connect cloud features
-                        (public identifiers, not secrets)
+  cp .env.example .env  optional build-time settings (mobile tracing)
 
 Details: docs/internals/devcontainer.md
 EOF

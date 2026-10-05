@@ -14,7 +14,7 @@ This document covers the unified release workflow for stable and nightly desktop
   - push tag matching `v*.*.*` for a stable release of an explicit commit
   - scheduled nightly check every 30 minutes
   - manual `workflow_dispatch` with `channel=nightly`
-  - manual `workflow_dispatch` with `channel=preview`, the maintainers' test train. It exercises the whole release flow (build, sign, notarize, smoke, publish) for a commit that end users must never receive, which is how an unmerged branch or a risky change gets a real release run before it lands. It builds the triggering commit with nightly's versioning under the `preview` prerelease identifier (`0.0.41-preview.<date>.<run>`) and publishes a GitHub prerelease plus the npm packages under the `preview` dist-tag. Preview is not on the schedule, no default npm dist-tag points at it, its desktop builds carry no update feed, and no updater manifest (`latest*.yml`, `nightly*.yml`, blockmaps) is attached, so a stable or nightly install cannot be offered one. The only ways onto it are downloading the release by hand, `npx t3@preview`, `T3CODE_CHANNEL=preview` for the install scripts, or `t3 update --channel preview` from a terminal; each prints a warning, and the CLI asks for confirmation when the running build is not itself a preview. The release itself is named as a maintainer test build and its body is a warning rather than generated notes: a changelog of unmerged branch history is not a changelog, and nightly and stable notes are unaffected because each series resolves its previous tag within its own channel. The hosted web app, AUR, and Discord announcements are skipped. Keep it; it costs nothing when idle.
+  - manual `workflow_dispatch` with `channel=preview`, the maintainers' test train. It exercises the whole release flow (build, sign, notarize, smoke, publish) for a commit that end users must never receive, which is how an unmerged branch or a risky change gets a real release run before it lands. It builds the triggering commit with nightly's versioning under the `preview` prerelease identifier (`0.0.41-preview.<date>.<run>`) and publishes a GitHub prerelease plus the npm packages under the `preview` dist-tag. Preview is not on the schedule, no default npm dist-tag points at it, its desktop builds carry no update feed, and no updater manifest (`latest*.yml`, `nightly*.yml`, blockmaps) is attached, so a stable or nightly install cannot be offered one. The only ways onto it are downloading the release by hand, `npx t3@preview`, `T3CODE_CHANNEL=preview` for the install scripts, or `t3 update --channel preview` from a terminal; each prints a warning, and the CLI asks for confirmation when the running build is not itself a preview. The release itself is named as a maintainer test build and its body is a warning rather than generated notes: a changelog of unmerged branch history is not a changelog, and nightly and stable notes are unaffected because each series resolves its previous tag within its own channel. AUR and Discord announcements are skipped. Keep it; it costs nothing when idle.
 - A manual stable release builds the commit of the latest published nightly, not `main` HEAD.
   Nightly is the release candidate: verify the nightly, then promote it. Merges to `main` keep
   landing while you verify and never leak into the stable build.
@@ -24,7 +24,6 @@ This document covers the unified release workflow for stable and nightly desktop
   - Pushing a `vX.Y.Z` tag by hand still works and builds exactly the tagged commit. Use it when
     the commit to ship is not the latest nightly, such as a cherry-picked fix on a release branch.
 - Runs lint, typecheck, and tests alongside artifact builds. Publishing waits for every check.
-- Reads the shared production T3 Connect relay URL and Clerk client configuration before packaging clients.
 - Builds the platform-independent JS (server bundle, web client, Electron main) once in the `build_bundle` job and hands it to every platform job as the `js-bundle` artifact; the platform jobs only package it, so no runner rebuilds it.
 - Builds six desktop artifacts in parallel for both channels, each as its own job (`desktop_<platform>_<arch>`, one call of `release-desktop.yml`) on hardware of its own architecture, gated only on the bundle. The Windows jobs embed the same-arch Linux CLI archive as the WSL runtime and wait for that artifact partway through, not for the whole Linux job:
   - macOS `arm64` DMG
@@ -47,15 +46,11 @@ This document covers the unified release workflow for stable and nightly desktop
   - nightly releases publish npm dist-tag `nightly`
   - preview releases publish npm dist-tag `preview`, which nothing resolves unless asked for by name
   - one-time setup: the `@t3code` npm scope (org) must exist, and `t3` and each `@t3code/t3-<platform>-<arch>` package needs a trusted publisher registered for this workflow file (see below).
-- Builds the hosted web app on Vercel while the desktop jobs run, and makes it live only after a release is published:
-  - stable releases are aliased to the `latest` hosted app channel
-  - nightly releases are aliased to the `nightly` hosted app channel
 - Signing is optional and auto-detected per platform from secrets.
 
 ## Pull request macOS previews
 
-Labeling a PR `preview:mac` publishes a signed, notarized Apple Silicon DMG with T3 Connect enabled
-to the rolling `desktop-preview` prerelease, and works for fork PRs. The label is a one-shot request
+Labeling a PR `preview:mac` publishes a signed, notarized Apple Silicon DMG to the rolling `desktop-preview` prerelease, and works for fork PRs. The label is a one-shot request
 for the commit it is applied to: the trusted workflow removes it once the build is in hand, and later
 pushes do not build until a maintainer applies it again. Every signed preview is therefore a
 per-commit maintainer decision, which matters because the result carries the Developer ID signature.
@@ -69,9 +64,8 @@ split so the Developer ID certificate never shares a job with PR code:
   bot, a collaborator, or listed in `.github/VOUCHED.td` (read from the default branch, so a PR cannot vouch
   for itself). It then packages and signs the bundle through `release-desktop.yml` checked out at
   `main`, so packaging, native helpers, and the Electron/desktop dependencies come from `main`, not
-  the PR. Only the version and the public T3 Connect identifiers in `.env.example` are read from the
-  PR commit, as data, so the signed app's passkey entitlement matches the bundle. A PR that changes
-  packaging must use the `channel=preview` release train above instead.
+  the PR. Only the version is read from the PR commit, as data. A PR that changes packaging must use
+  the `channel=preview` release train above instead.
 
 Before handing the bundle to the signing runner, the trusted workflow validates its ZIP entries
 and accepts only regular files under `server/dist` and `desktop/dist-electron`, plus the directory
@@ -93,122 +87,6 @@ The finalize job uses them to commit and push aligned package versions to `main`
 GitHub Release publication uses the repository-scoped workflow token so it has a rate-limit quota
 independent from the shared Release App installation.
 
-## T3 Connect relay deployment
-
-The relay is a shared control plane versioned separately from client releases. Stable and nightly
-client builds must point at the same relay so users see the same linked environments when switching
-release channels.
-
-`.github/workflows/deploy-relay.yml` deploys Alchemy stage `prod` on every push to `main`. The
-release workflow reads the relay URL and Clerk client configuration from the existing `production`
-GitHub Actions environment before building desktop, CLI, or hosted web artifacts.
-
-Required repository variables shared by relay deployments:
-
-- `CLOUDFLARE_ACCOUNT_ID`
-- `PLANETSCALE_ORGANIZATION`
-- `AXIOM_ORG_ID`
-
-Required repository secrets shared by relay deployments:
-
-- `CLOUDFLARE_API_TOKEN`
-- `PLANETSCALE_API_TOKEN_ID`
-- `PLANETSCALE_API_TOKEN`
-- `AXIOM_TOKEN`
-
-Required `production` environment variables:
-
-- `RELAY_API_ZONE_NAME`
-- `RELAY_TUNNEL_ZONE_NAME`
-- `CLERK_PUBLISHABLE_KEY`
-- `CLERK_JWT_AUDIENCE`
-- `CLERK_JWT_TEMPLATE`
-- `CLERK_CLI_OAUTH_CLIENT_ID`
-- `APNS_ENVIRONMENT`
-- `APNS_TEAM_ID`
-- `APNS_KEY_ID`
-- `APNS_BUNDLE_ID`
-
-Optional `production` environment variables:
-
-- `RELAY_DOMAIN` when overriding the derived `relay.<RELAY_API_ZONE_NAME>` domain
-- `RELAY_TUNNEL_CLEANUP_MODE` with `off`, `dry-run`, or `enabled`. Missing and blank values use
-  `off`.
-
-Required `production` environment secrets:
-
-- `CLERK_SECRET_KEY`
-- `APNS_PRIVATE_KEY`
-
-The relay Worker reads these variables and secrets when it is deployed. Alchemy does not redeploy the
-Worker when only one of these values changes ([alchemy-run/alchemy#1831](https://github.com/alchemy-run/alchemy/issues/1831)),
-so a push to `main` without relay code changes leaves the old value in place. After changing one, run
-the **Deploy T3 Connect relay** workflow manually from `main` with **force** checked.
-
-The account-scoped repository credentials are consumed by Alchemy while provisioning relay stages; they
-are not bound into the relay Worker. The production deployment uses an Axiom personal access token,
-so `AXIOM_ORG_ID` must accompany `AXIOM_TOKEN`. The `prod` stage owns the retained PlanetScale
-database. Local personal stages provision isolated branches from it and are never deployed by CI.
-Production adopts the configured relay API and tunnel DNS zones as retained Cloudflare resources.
-Personal stages reference the production-owned zones.
-
-Developers deploy personal stages locally rather than through pull-request automation:
-
-```sh
-vp run --filter t3code-relay deploy -- --stage "$USER" --env-file .env.local
-```
-
-### Managed tunnel cleanup rollout
-
-Keep `RELAY_TUNNEL_CLEANUP_MODE=off` for the first production deploy. That deploy applies the
-nullable allocation migration and adds the recovery endpoints. Web and mobile clients need no
-coordinated release. CLI and desktop server builds must reach users before cleanup is enabled,
-because those builds register recovery and replace a deleted tunnel after wake.
-
-1. Deploy the relay and migration with cleanup `off`.
-2. Release the server build and confirm current hosts register recovery. Older hosts stay marked
-   legacy and are never candidates.
-3. Set `dry-run`, run a forced relay deploy, and read the sweep counters (`scanned`, `wouldDelete`,
-   `skippedLegacy`, `skippedOrphan`, `failed`, `truncated`) across several sweeps. Each sweep records
-   them, and the active `mode`, as `relay.managed_endpoint_reaper.*` attributes on its
-   `relay.managed_endpoint_reaper.sweep` span in Axiom.
-4. Run the disposable-host canary below.
-5. Set `enabled` only after the canary recovers without a server restart.
-
-The job runs every five minutes with a five-minute grace period for tunnels that lost their
-connector, so a candidate is usually removed five to ten minutes after it goes down. Tunnels that
-never connected wait an hour. One sweep attempts at most 100 deletions, so a backlog takes longer.
-Changing `RELAY_TUNNEL_CLEANUP_MODE`, including turning cleanup off during an incident, needs a forced
-relay deploy. Confirm the new `mode` on the next sweep span.
-
-To roll back, set cleanup to `off` and run a forced relay deploy before downgrading any host. Keep the
-recovery endpoints deployed while current server builds are in use. The nullable columns can stay.
-
-### Disposable-host canary
-
-This test has not been run against a real Cloudflare account. Run it against a disposable relay
-stage, test Cloudflare account, disposable host, and disposable T3 home. Keep production cleanup at
-`off` or `dry-run` until it passes. Do not stop a daily-use T3 server.
-
-1. Deploy the disposable stage with cleanup `dry-run`. Link a first disposable environment through
-   web or mobile settings and confirm its tunnel is healthy and recovery is registered.
-2. Stop that host and restart the same T3 home on a different local port. Confirm the public
-   hostname reaches the new port and sends nothing to the old one.
-3. Link a second disposable environment with a server build that predates recovery registration.
-   Capture its managed `cloudflared` child PID, confirm it belongs to that host, and pause only that
-   child with `kill -STOP <legacy-pid>`. Wait until Cloudflare reports it down for over five minutes.
-4. Capture the first environment's `cloudflared` child PID from its server logs, confirm ownership,
-   and pause it with `kill -STOP <first-pid>`. Wait until Cloudflare reports it down for over five
-   minutes.
-5. Confirm dry-run counts the first tunnel in `wouldDelete` and the second in `skippedLegacy`.
-6. Set cleanup `enabled` on the disposable stage and deploy it with `--force`. Confirm in the test
-   Cloudflare account that the first tunnel is deleted and the legacy tunnel still exists.
-7. Resume the first child with `kill -CONT <first-pid>`. Confirm the running server detects the
-   repeated rejection, requests recovery, and becomes reachable at the same hostname without a
-   restart.
-8. Resume the legacy child with `kill -CONT <legacy-pid>` and confirm its tunnel reconnects.
-9. Repeat with a physical sleep and wake cycle on a disposable laptop before broad rollout.
-
 ## Marketing site deployment
 
 On nightly releases, the release workflow builds the same commit as a staged
@@ -221,60 +99,6 @@ The job looks up the `t3code-marketing` project using the existing `VERCEL_TOKEN
 and `VERCEL_ORG_ID` secrets. It also respects the optional `VERCEL_TEAM_SLUG`
 variable. The Vercel project's root directory must be `apps/marketing`.
 Git deployments remain disabled in `apps/marketing/vercel.ts`.
-
-## Hosted web app release deployment
-
-The hosted app is intentionally not deployed by Vercel's Git integration. The
-web project disables automatic Git deployments in `apps/web/vercel.ts` via
-`git.deploymentEnabled: false`. `.github/workflows/release.yml` builds the web
-app with Vercel CLI as a staged production deployment (`--skip-domain`) while
-the desktop jobs run, and aliases the channel domains to it after the GitHub
-Release succeeds.
-
-Required GitHub Actions secrets:
-
-- `VERCEL_TOKEN`
-- `VERCEL_ORG_ID`
-- `VERCEL_PROJECT_ID`
-
-Optional GitHub Actions variables:
-
-- `VERCEL_TEAM_SLUG`: overrides the Vercel CLI scope when the team slug is preferred over the `VERCEL_ORG_ID` secret.
-- `T3CODE_WEB_ROUTER_URL`: defaults to `https://app.t3.codes`.
-- `T3CODE_WEB_LATEST_DOMAIN`: defaults to `latest.app.t3.codes`.
-- `T3CODE_WEB_NIGHTLY_DOMAIN`: defaults to `nightly.app.t3.codes`.
-
-Required Vercel domains:
-
-- `app.t3.codes`: the router domain users open, updated by stable releases.
-- `latest.app.t3.codes`: channel alias updated by stable releases.
-- `nightly.app.t3.codes`: channel alias updated by nightly releases.
-
-The router domain uses `apps/web/vercel.ts` routes. Users opt into a channel by
-visiting `/__t3code/channel?channel=latest` or
-`/__t3code/channel?channel=nightly`; the router stores the
-`t3code_web_channel` cookie and rewrites future requests on `app.t3.codes` to
-the matching channel alias.
-
-The release deploy job rewrites release package versions before upload so the
-hosted app's About panel renders the release version. Stable deploys alias the
-same deployment to both the `latest` channel and the router domain so the router
-rules stay current. Nightly deploys only alias the `nightly` channel. The job
-also passes `VITE_HOSTED_APP_CHANNEL=latest|nightly`, which renders the hosted
-update track selector in the About panel. Changing the selector navigates
-through `/__t3code/channel` on the router domain so the user's channel cookie is
-updated before redirecting to the hosted app root.
-
-One-time Vercel dashboard setup:
-
-1. Confirm the web project root directory remains `apps/web`.
-2. Add the three domains above to the web project.
-3. Disable automatic Git deployments in the dashboard if desired; the committed
-   `vercel.ts` setting is the source-of-truth, but disconnecting Git in the
-   dashboard is also safe.
-4. Run one stable release deployment, or manually alias the current stable
-   deployment, so `app.t3.codes` points at a deployment containing the router
-   rules in `apps/web/vercel.ts`. Future stable releases keep this alias current.
 
 ## Nightly builds
 
@@ -298,18 +122,13 @@ One-time Vercel dashboard setup:
 ## Server self-update release invariant
 
 Connected servers update to the client's exact version, not to an npm dist-tag. Every released
-desktop or hosted client version must therefore have a matching `t3@<version>` package available on
+desktop client version must therefore have a matching `t3@<version>` package available on
 npm before users can receive that client.
 
 The workflow enforces this ordering:
 
 1. `publish_cli` publishes the exact release version to npm, on every channel.
 2. `release` depends on `publish_cli` before exposing desktop artifacts in GitHub Releases.
-3. `deploy_web` depends on `release` before moving the hosted channel to the new client.
-   `build_web` builds that client earlier with `vercel deploy --prod --skip-domain`, which
-   leaves the custom domains alone but moves the project's own `*.vercel.app` production
-   hostname. That hostname is behind Vercel SSO, so users only get the client through the
-   custom domains.
 
 Preserve these dependencies when changing the release graph. Publishing a client first would leave
 the **Update server** action targeting a package version that does not exist yet.
@@ -424,15 +243,15 @@ Checklist:
 
 There is no dry-run tag path. Pushing any accepted non-nightly tag, including
 `v0.0.0-test.1`, classifies the run as the stable channel. It publishes `t3` with npm dist-tag
-`latest`, creates a real GitHub Release, aliases the hosted app to `latest.app.t3.codes` and
-`app.t3.codes`, and can commit a version bump to `main` in the finalize job. Do not push a test tag
+`latest`, creates a real GitHub Release, and can commit a version bump to `main` in the finalize
+job. Do not push a test tag
 to validate the workflow.
 
 The workflow has no non-publishing `workflow_dispatch` mode. Use normal CI or local quality gates to
 validate checks and builds without shipping. To exercise the complete release graph at lower stable
 risk, manually dispatch `channel=nightly`; this still publishes a real nightly npm package, GitHub
-prerelease, desktop updater release, hosted nightly alias, and marketing site, but it does not update stable app aliases or
-commit a version bump to `main`. Only run it when a real nightly release is acceptable.
+prerelease, desktop updater release, and marketing site, but it does not commit a version bump to
+`main`. Only run it when a real nightly release is acceptable.
 
 Manual `channel=stable` is also a real stable-channel release. Omitting signing secrets only makes
 platform artifacts unsigned; it does not prevent publication.
