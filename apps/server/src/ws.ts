@@ -73,8 +73,6 @@ import {
   ProjectMutationError,
   ProviderUploadFeedbackError,
   ProviderSetupError,
-  RelayClientInstallFailedError,
-  type RelayClientInstallProgressEvent,
   type ServerSelfUpdateError,
   type ServerSelfUpdateProgressEvent,
   type ServerConfig as ClientServerConfig,
@@ -239,7 +237,6 @@ import * as VcsProjectConfig from "./vcs/VcsProjectConfig.ts";
 import * as PairingGrantStore from "./auth/PairingGrantStore.ts";
 import * as SessionStore from "./auth/SessionStore.ts";
 import { failEnvironmentAuthInvalid, failEnvironmentInternal } from "./auth/http.ts";
-import * as RelayClient from "@t3tools/shared/relayClient";
 import {
   sameUsageLimitCommandCoverage,
   withUsageLimitsCommands,
@@ -1316,7 +1313,6 @@ const layerWsRpc = (
       const hostResources = yield* HostResources.HostResources;
       const processResourceMonitor = yield* ProcessResourceMonitor.ProcessResourceMonitor;
       const resourceTelemetry = yield* ResourceTelemetry.ResourceTelemetry;
-      const relayClient = yield* RelayClient.RelayClient;
       // A webhook URL starts agent runs, so only sessions that may operate
       // see it; read-only sessions still see the task itself.
       const withVisibleWebhookUrls = (result: ScheduledTaskListResult): ScheduledTaskListResult =>
@@ -2678,40 +2674,6 @@ const layerWsRpc = (
           observeRpcEffect(WS_METHODS.serverGetBackgroundPolicy, backgroundPolicy.snapshot, {
             "rpc.aggregate": "server",
           }),
-        [WS_METHODS.cloudGetRelayClientStatus]: (_input) =>
-          observeRpcEffect(WS_METHODS.cloudGetRelayClientStatus, relayClient.resolve, {
-            "rpc.aggregate": "cloud",
-          }),
-        [WS_METHODS.cloudInstallRelayClient]: (_input) =>
-          observeRpcStream(
-            WS_METHODS.cloudInstallRelayClient,
-            Stream.callback<RelayClientInstallProgressEvent, RelayClientInstallFailedError>(
-              (queue) =>
-                relayClient
-                  .installWithProgress((event) => Queue.offer(queue, event).pipe(Effect.asVoid))
-                  .pipe(
-                    Effect.flatMap((status) =>
-                      Queue.offer(queue, {
-                        type: "complete",
-                        status,
-                      }),
-                    ),
-                    Effect.catchTags({
-                      RelayClientInstallError: (error) =>
-                        Queue.fail(
-                          queue,
-                          new RelayClientInstallFailedError({
-                            reason: error.reason,
-                            message: error.message,
-                          }),
-                        ),
-                    }),
-                    Effect.andThen(Queue.end(queue)),
-                    Effect.forkScoped,
-                  ),
-            ),
-            { "rpc.aggregate": "cloud" },
-          ),
         [WS_METHODS.pullRequestsList]: (input) =>
           observeRpcEffect(WS_METHODS.pullRequestsList, pullRequests.list(input), {
             "rpc.aggregate": "pull-requests",
