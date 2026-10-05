@@ -43,6 +43,8 @@ it.layer(Layer.mergeAll(NodeServices.layer, NetService.layer))("t3 uninstall com
             }),
             withStopped: (operation) => operation,
             restart: Effect.die("unexpected restart"),
+            stage: () => Effect.die("unexpected stage"),
+            start: Effect.die("unexpected start"),
             install: () => Effect.die("unexpected install"),
             uninstall: Effect.sync(() => {
               uninstalls.push(true);

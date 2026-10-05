@@ -31,6 +31,7 @@ import {
   pinnedRuntimePaths,
   pinnedRuntimeVersionsDir,
   PinnedRuntimeInstallError,
+  type PinnedRuntimePaths,
 } from "./pinnedRuntime.ts";
 import {
   SERVICE_LAUNCHER_PROTOCOL,
@@ -292,6 +293,7 @@ export interface BootServiceManager {
   readonly restart: ReadonlyArray<BootServiceStep>;
   /** Queue a restart owned by the manager, since stopping would kill the caller. */
   readonly handoff?: ReadonlyArray<BootServiceStep>;
+  readonly start: ReadonlyArray<BootServiceStep>;
   readonly deactivate: ReadonlyArray<BootServiceStep>;
   readonly finalize: ReadonlyArray<BootServiceStep>;
 }
@@ -361,6 +363,15 @@ function systemdManager(input: {
         args: ["--user", "restart", "--no-block", BOOT_SERVICE_UNIT_FILE],
       },
     ],
+    // `install --no-start` leaves a fresh unit unloaded and disabled.
+    start: [
+      ...prepareActivation,
+      {
+        step: "starting the service",
+        command: "systemctl",
+        args: ["--user", "start", BOOT_SERVICE_UNIT_FILE],
+      },
+    ],
     deactivate: [
       {
         step: "stopping the service",
@@ -426,6 +437,28 @@ function launchdManager(input: {
         step: "restarting the service after a failed update",
         command: "launchctl",
         args: ["bootstrap", domainTarget, unitPath],
+      },
+    ],
+    // bootstrap loads and starts an unloaded job and fails harmlessly on a
+    // loaded one; kickstart without -k then starts a loaded job that is not
+    // running and leaves a running one alone.
+    start: [
+      {
+        step: "enabling the launch agent",
+        command: "launchctl",
+        args: ["enable", serviceTarget],
+        optional: true,
+      },
+      {
+        step: "loading the launch agent",
+        command: "launchctl",
+        args: ["bootstrap", domainTarget, unitPath],
+        optional: true,
+      },
+      {
+        step: "starting the service",
+        command: "launchctl",
+        args: ["kickstart", serviceTarget],
       },
     ],
     // Persisted launchctl disable overrides would block reinstall.
@@ -512,6 +545,15 @@ function schtasksManager(input: {
         optional: true,
       },
       { ...run, step: "restarting the service" },
+    ],
+    // The task ignores a second run while its instance is still running.
+    start: [
+      {
+        step: "enabling the scheduled task",
+        command: "schtasks",
+        args: ["/Change", ...task, "/ENABLE"],
+      },
+      run,
     ],
     deactivate: [...stop, { step: "removing the scheduled task", run: input.steps.remove }],
     finalize: [],
@@ -643,14 +685,22 @@ const BootServiceProblem = Schema.Literals([
 ]);
 type BootServiceProblem = typeof BootServiceProblem.Type;
 
+/**
+ * Lingering only decides whether the service outlives the login session, so
+ * it is reported but never blocks an install or makes a service out of date.
+ */
+export function isBootServiceWarning(problem: BootServiceProblem): boolean {
+  return problem === "linger-disabled" || problem === "linger-unavailable";
+}
+
 export function formatBootServiceProblem(problem: BootServiceProblem): string {
   switch (problem) {
     case "user-manager-unavailable":
       return "Cannot reach the systemd user manager. Run `systemctl --user status` in a login session for the service user. Install your distribution's systemd user-session support if it is missing; do not run T3 with sudo.";
     case "linger-unavailable":
-      return 'Cannot check whether this user can run services after logout. Run `loginctl show-user "$(id -un)" --property=Linger` and check that systemd-logind is available.';
+      return 'Cannot check whether this user can run services after logout, so T3 Code may stop when your last login session ends. Run `loginctl show-user "$(id -un)" --property=Linger` and check that systemd-logind is available.';
     case "linger-disabled":
-      return 'Lingering is disabled. T3 Code will stop when your last login session ends and will not start at boot. Run `sudo loginctl enable-linger "$(id -un)"` on this machine, then retry the service command as your normal user.';
+      return 'Lingering is disabled, so T3 Code runs while you are logged in, stops when your last login session ends, and does not start at boot. To keep it running, run `sudo loginctl enable-linger "$(id -un)"` once.';
     case "service-disabled":
       return "The service is not enabled to start automatically. Run `t3 service install` to repair it.";
     case "service-stopped":
@@ -749,13 +799,28 @@ export interface BootServiceStatus {
   readonly logPath: string;
 }
 
+export interface BootServiceRuntimeOptions {
+  /**
+   * Unpack this release archive instead of downloading one. The desktop app
+   * passes the archive it ships, so the service runs the app's own version
+   * without a network.
+   */
+  readonly runtimeArchive?: string | undefined;
+}
+
 export class BootService extends Context.Service<
   BootService,
   {
-    readonly install: (options?: {
-      readonly allowDowngrade?: boolean;
-      readonly start?: boolean;
-    }) => Effect.Effect<BootServicePlan, BootServiceError>;
+    /** Puts this version's runtime in place without touching the service. */
+    readonly stage: (
+      options?: BootServiceRuntimeOptions,
+    ) => Effect.Effect<PinnedRuntimePaths, BootServiceError>;
+    readonly install: (
+      options?: BootServiceRuntimeOptions & {
+        readonly allowDowngrade?: boolean;
+        readonly start?: boolean;
+      },
+    ) => Effect.Effect<BootServicePlan, BootServiceError>;
     /**
      * Only when the unit serves this base dir: the unit name is per user, so
      * another home's service is left alone, which resolves `skipped`. From
@@ -763,6 +828,11 @@ export class BootService extends Context.Service<
      * manager, since the stop ends this process.
      */
     readonly restart: Effect.Effect<"restarted" | "queued" | "skipped", BootServiceError>;
+    /**
+     * Starts the installed service if it is not running; a running service is left alone.
+     * Same base-dir guard as restart. Resolves false when nothing is installed for this base dir.
+     */
+    readonly start: Effect.Effect<boolean, BootServiceError>;
     /**
      * Runs the operation with this home's service stopped; other homes are left alone.
      * Restores a previously enabled or loaded service even if stopping failed.
@@ -1133,14 +1203,23 @@ export const make = Effect.fn("cloud.boot_service.make")(function* (input: {
     const withoutSession =
       problems.includes("linger-unavailable") && problems.includes("user-manager-unavailable");
     const lingerDisabled = problems.includes("linger-disabled");
-    if (rootUnderSudo || (!lingerDisabled && !withoutSession)) {
-      return yield* new BootServicePrerequisiteError({ problem: firstProblem });
-    }
-    yield* runStep("enabling lingering for this user", "loginctl", [
+    const enableLinger = runStep("enabling lingering for this user", "loginctl", [
       "enable-linger",
       "--no-ask-password",
       ...(uid === undefined ? [] : [String(uid)]),
-    ]).pipe(
+    ]);
+    if (!rootUnderSudo && problems.every(isBootServiceWarning)) {
+      // polkit lets an active local session enable lingering for its own user,
+      // so this usually works without sudo. When it is refused, the service
+      // still runs while the user is logged in; status reports the warning and
+      // the refusal is in the boot-service log.
+      if (lingerDisabled) yield* enableLinger.pipe(Effect.ignore);
+      return;
+    }
+    if (rootUnderSudo || (!lingerDisabled && !withoutSession)) {
+      return yield* new BootServicePrerequisiteError({ problem: firstProblem });
+    }
+    yield* enableLinger.pipe(
       Effect.mapError(
         // Without a session this also fails on hosts that do not run systemd at all.
         (cause) =>
@@ -1158,7 +1237,8 @@ export const make = Effect.fn("cloud.boot_service.make")(function* (input: {
         while: (current) => current.includes("user-manager-unavailable"),
       }),
     );
-    if (remaining[0]) return yield* new BootServicePrerequisiteError({ problem: remaining[0] });
+    const unavailable = remaining.find((problem) => !isBootServiceWarning(problem));
+    if (unavailable) return yield* new BootServicePrerequisiteError({ problem: unavailable });
   });
 
   const withSelectionLock = <A, E, R>(selectionPath: string, operation: Effect.Effect<A, E, R>) =>
@@ -1191,46 +1271,10 @@ export const make = Effect.fn("cloud.boot_service.make")(function* (input: {
     return problems;
   });
 
-  const install = Effect.fn("cloud.boot_service.install")(function* (options?: {
-    readonly allowDowngrade?: boolean;
-    readonly start?: boolean;
-  }) {
-    let manager = yield* requireManager;
-    if (manager.kind === "systemd" && systemdUnsafeValue(plan)) {
-      return yield* new BootServiceBaseDirUnsupportedError({ baseDir: input.baseDir });
-    }
-    // The unit is per user. Rewriting one that serves another home moves the
-    // service onto this home's data, which looks like every thread vanished.
-    const refuseOtherBaseDir = Effect.gen(function* () {
-      const existingUnit = yield* fs.readFileString(unitPath).pipe(Effect.option);
-      const installedBaseDir = Option.isSome(existingUnit)
-        ? otherBaseDirOf(existingUnit.value)
-        : undefined;
-      if (installedBaseDir !== undefined) {
-        return yield* new BootServiceOtherBaseDirError({
-          installedBaseDir,
-          baseDir: input.baseDir,
-        });
-      }
-    });
-    yield* refuseOtherBaseDir;
-    yield* fs
-      .makeDirectory(input.logsDir, { recursive: true })
-      .pipe(Effect.mapError((cause) => new BootServiceInstallError({ cause })));
-
-    if (manager.kind === "systemd") {
-      yield* requireSystemdPrerequisites.pipe(Effect.tapError(logFailure));
-      // Without a session the manager was unreachable at construction, and the one lingering
-      // started may use another config root than this shell's XDG_CONFIG_HOME.
-      if (systemdUnitDir === undefined) {
-        systemdUnitDir = yield* readSystemdUnitDirectory(runner);
-        ({ manager: detectedManager, unitPath, plan } = resolveTarget(systemdUnitDir));
-        manager = yield* requireManager;
-        yield* refuseOtherBaseDir;
-      }
-    }
-
-    yield* ensurePinnedRuntimeInstalled({
+  const stage = Effect.fn("cloud.boot_service.stage")(function* (
+    options?: BootServiceRuntimeOptions,
+  ) {
+    return yield* ensurePinnedRuntimeInstalled({
       baseDir: input.baseDir,
       version: input.cliVersion,
       fs,
@@ -1240,6 +1284,7 @@ export const make = Effect.fn("cloud.boot_service.make")(function* (input: {
       platform,
       arch,
       releaseBaseUrl,
+      localArchive: options?.runtimeArchive,
       validate: (runtime) =>
         runner
           .run({
@@ -1282,6 +1327,50 @@ export const make = Effect.fn("cloud.boot_service.make")(function* (input: {
           : new BootServiceInstallError({ cause: error }),
       ),
     );
+  });
+
+  const install = Effect.fn("cloud.boot_service.install")(function* (
+    options?: BootServiceRuntimeOptions & {
+      readonly allowDowngrade?: boolean;
+      readonly start?: boolean;
+    },
+  ) {
+    let manager = yield* requireManager;
+    if (manager.kind === "systemd" && systemdUnsafeValue(plan)) {
+      return yield* new BootServiceBaseDirUnsupportedError({ baseDir: input.baseDir });
+    }
+    // The unit is per user. Rewriting one that serves another home moves the
+    // service onto this home's data, which looks like every thread vanished.
+    const refuseOtherBaseDir = Effect.gen(function* () {
+      const existingUnit = yield* fs.readFileString(unitPath).pipe(Effect.option);
+      const installedBaseDir = Option.isSome(existingUnit)
+        ? otherBaseDirOf(existingUnit.value)
+        : undefined;
+      if (installedBaseDir !== undefined) {
+        return yield* new BootServiceOtherBaseDirError({
+          installedBaseDir,
+          baseDir: input.baseDir,
+        });
+      }
+    });
+    yield* refuseOtherBaseDir;
+    yield* fs
+      .makeDirectory(input.logsDir, { recursive: true })
+      .pipe(Effect.mapError((cause) => new BootServiceInstallError({ cause })));
+
+    if (manager.kind === "systemd") {
+      yield* requireSystemdPrerequisites.pipe(Effect.tapError(logFailure));
+      // Without a session the manager was unreachable at construction, and the one lingering
+      // started may use another config root than this shell's XDG_CONFIG_HOME.
+      if (systemdUnitDir === undefined) {
+        systemdUnitDir = yield* readSystemdUnitDirectory(runner);
+        ({ manager: detectedManager, unitPath, plan } = resolveTarget(systemdUnitDir));
+        manager = yield* requireManager;
+        yield* refuseOtherBaseDir;
+      }
+    }
+
+    yield* stage(options);
     const installed = yield* fs
       .exists(unitPath)
       .pipe(Effect.mapError((cause) => new BootServiceInstallError({ cause })));
@@ -1420,17 +1509,19 @@ export const make = Effect.fn("cloud.boot_service.make")(function* (input: {
     return handOff ? { ...installedPlan, handedOff: true } : installedPlan;
   });
 
+  const servesThisBaseDir = Effect.gen(function* () {
+    const unit = yield* fs.readFileString(unitPath).pipe(Effect.option);
+    if (Option.isNone(unit)) return false;
+    const installedBaseDir = bootServiceBaseDirOf(unit.value);
+    return (
+      installedBaseDir !== undefined &&
+      path.resolve(installedBaseDir) === path.resolve(input.baseDir)
+    );
+  });
+
   const restart: BootService["Service"]["restart"] = Effect.gen(function* () {
     const manager = yield* requireManager;
-    const unit = yield* fs.readFileString(unitPath).pipe(Effect.option);
-    if (Option.isNone(unit)) return "skipped" as const;
-    const installedBaseDir = bootServiceBaseDirOf(unit.value);
-    if (
-      installedBaseDir === undefined ||
-      path.resolve(installedBaseDir) !== path.resolve(input.baseDir)
-    ) {
-      return "skipped" as const;
-    }
+    if (!(yield* servesThisBaseDir)) return "skipped" as const;
     // Writes no state, and the launcher lets an update transition in flight
     // finish before the queued stop tears it down.
     if (runningInsideService && manager.handoff !== undefined) {
@@ -1449,6 +1540,13 @@ export const make = Effect.fn("cloud.boot_service.make")(function* (input: {
     ),
     Effect.withSpan("cloud.boot_service.restart"),
   );
+
+  const start: BootService["Service"]["start"] = Effect.gen(function* () {
+    const manager = yield* requireManager;
+    if (!(yield* servesThisBaseDir)) return false;
+    yield* runSteps(manager.start);
+    return true;
+  }).pipe(Effect.withSpan("cloud.boot_service.start"));
 
   const withStopped = Effect.fn("cloud.boot_service.with_stopped")(function* <A, E, R>(
     operation: Effect.Effect<A, E, R>,
@@ -1561,7 +1659,7 @@ export const make = Effect.fn("cloud.boot_service.make")(function* (input: {
       ...(otherBaseDir === undefined ? {} : { otherBaseDir }),
       problems,
       current:
-        problems.length === 0 &&
+        problems.every(isBootServiceWarning) &&
         !(manager.kind === "systemd" && systemdUnsafeValue(planForUnit(unit))) &&
         normalizeUnit(unit) === normalizeUnit(manager.render(planForUnit(unit))) &&
         runtimeEntryExists &&
@@ -1577,7 +1675,7 @@ export const make = Effect.fn("cloud.boot_service.make")(function* (input: {
     Effect.withSpan("cloud.boot_service.status"),
   );
 
-  return BootService.of({ install, restart, withStopped, uninstall, status });
+  return BootService.of({ stage, install, restart, start, withStopped, uninstall, status });
 });
 
 export const layer = (input: {

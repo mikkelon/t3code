@@ -169,7 +169,11 @@ Mobile keeps its manual environment selection.
 ### Tailscale HTTPS
 
 Join both devices to the same tailnet. In the desktop app, enable **Tailscale
-HTTPS** in **Settings → Sharing & access**. Turn it off there to remove that route.
+HTTPS** in **Settings → Sharing & access** and pick the HTTPS port (443, 8443 or
+10000). Turn it off there to remove that route. When the desktop app uses the
+[background service](./background-service.md), or a browser is connected to a
+server you administer, the switch configures that server, which keeps its
+Tailscale URL across restarts.
 
 To start a command-line server with Tailscale HTTPS:
 
@@ -467,6 +471,9 @@ history, and saved connections are kept, and you keep working through pairing, T
 If a [background service](./background-service.md) on this computer uses the same T3 home, the
 app still treats it as this computer: **Open in** and file reveal for its projects run here,
 whichever connection you reach it through.
+
+If this computer runs the [background service](./background-service.md), the app only stops
+connecting to it; the service keeps running until you uninstall it.
 
 Switch **Local environment** back on in the same place to restart with your previous local
 settings.
