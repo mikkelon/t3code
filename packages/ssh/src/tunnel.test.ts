@@ -8,6 +8,7 @@ import { assert, describe, it } from "@effect/vitest";
 import * as NodeCrypto from "@effect/platform-node/NodeCrypto";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import * as HostProcess from "@t3tools/shared/HostProcess";
+import { CLI_RELEASE_REPOSITORY } from "@t3tools/shared/cliRelease";
 import * as NetService from "@t3tools/shared/Net";
 import * as Clock from "effect/Clock";
 import * as Deferred from "effect/Deferred";
@@ -221,6 +222,20 @@ describe("ssh tunnel scripts", () => {
     }).pipe(Effect.scoped, Effect.provide(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer))),
   );
 
+  it("downloads the release archive from the fork's releases, including -mk versions", () => {
+    const script = SshTunnel.buildRemoteT3RunnerScript(ARCHIVE);
+
+    assert.include(
+      script,
+      `T3_RELEASE_BASE_URL='https://github.com/${CLI_RELEASE_REPOSITORY}/releases/download'`,
+    );
+    // Fork releases are <core>-mk.<n>.
+    assert.include(
+      SshTunnel.buildRemoteT3RunnerScript({ archiveVersion: "0.0.46-mk.1" }),
+      "T3_ARCHIVE_VERSION='0.0.46-mk.1'",
+    );
+  });
+
   it("rejects archive versions that are not a single exact version segment", () => {
     for (const archiveVersion of [
       "../other",
@@ -275,7 +290,10 @@ describe("ssh tunnel scripts", () => {
           assert.include(result.stderr, "download attempt");
           // A bare curl error does not tell the user that t3 itself could not be downloaded.
           assert.include(result.stderr, ARCHIVE.archiveVersion);
-          assert.include(result.stderr, "https://github.com/pingdotgg/t3code/releases/download");
+          assert.include(
+            result.stderr,
+            `https://github.com/${CLI_RELEASE_REPOSITORY}/releases/download`,
+          );
         } else {
           assert.notInclude(result.stderr, "download attempt");
           assert.include(result.stderr, "has no t3 release archive.");
