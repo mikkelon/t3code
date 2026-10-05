@@ -136,6 +136,21 @@ describe("versionSkew", () => {
     });
   });
 
+  it("warns when a fork server is behind a fork client on the same core version", () => {
+    branding.APP_VERSION = "0.0.34-mk.2";
+    expect(resolveVersionMismatch("0.0.34-mk.1")).toMatchObject({
+      clientVersion: "0.0.34-mk.2",
+      serverVersion: "0.0.34-mk.1",
+    });
+    expect(resolveVersionMismatch("0.0.34-mk.2")).toBeNull();
+    expect(resolveVersionMismatch("0.0.34-mk.3")).toBeNull();
+  });
+
+  it("does not warn when a fork build and an upstream stable build share a core version", () => {
+    branding.APP_VERSION = "0.0.34-mk.2";
+    expect(resolveVersionMismatch("0.0.34")).toBeNull();
+  });
+
   it("falls back to string inequality when a version is not semver", () => {
     expect(resolveVersionMismatch("dev")).toEqual({
       clientVersion: "0.0.34",

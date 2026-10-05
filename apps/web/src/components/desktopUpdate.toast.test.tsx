@@ -1,6 +1,7 @@
 import { isValidElement, type ReactElement, type ReactNode } from "react";
 import { beforeEach, describe, expect, it, vi } from "vite-plus/test";
 import type { DesktopUpdateState } from "@t3tools/contracts";
+import { CLI_RELEASE_REPOSITORY } from "@t3tools/shared/cliRelease";
 
 const testState = vi.hoisted(() => ({
   addToast: vi.fn(),
@@ -11,6 +12,8 @@ vi.mock("./ui/toast", () => ({
 }));
 
 import { showDesktopUpdateDownloadedToast } from "./desktopUpdate.toast";
+
+const RELEASES_URL = `https://github.com/${CLI_RELEASE_REPOSITORY}/releases`;
 
 type ClickableElement = ReactElement<{ readonly onClick?: () => void }>;
 
@@ -72,9 +75,7 @@ describe("showDesktopUpdateDownloadedToast", () => {
     const link = findReleaseNotesLink(getDescription());
     link?.props.onClick?.();
     await vi.waitFor(() => {
-      expect(openExternal).toHaveBeenCalledWith(
-        "https://github.com/pingdotgg/t3code/releases/tag/v0.0.30",
-      );
+      expect(openExternal).toHaveBeenCalledWith(`${RELEASES_URL}/tag/v0.0.30`);
     });
     expect(testState.addToast).toHaveBeenCalledTimes(1);
   });
@@ -90,9 +91,7 @@ describe("showDesktopUpdateDownloadedToast", () => {
     findReleaseNotesLink(getDescription())?.props.onClick?.();
 
     await vi.waitFor(() => {
-      expect(openExternal).toHaveBeenCalledWith(
-        "https://github.com/pingdotgg/t3code/releases/tag/v0.0.30",
-      );
+      expect(openExternal).toHaveBeenCalledWith(`${RELEASES_URL}/tag/v0.0.30`);
     });
   });
 
