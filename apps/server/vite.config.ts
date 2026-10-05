@@ -16,16 +16,6 @@ export { shouldBundleCliDependency };
 const cliBuildChannel = /^[^-+]+-(?:nightly|preview)\./.test(packageJson.version)
   ? "nightly"
   : "latest";
-// Sent with every analytics event. Release workflows set it for pingdotgg/t3code
-// builds only, so local builds and forks report "dev". A typo fails the build
-// instead of mislabeling events.
-const TELEMETRY_CHANNELS = ["stable", "nightly", "preview", "dev"];
-const telemetryChannel = process.env.T3CODE_TELEMETRY_CHANNEL?.trim() || "dev";
-if (!TELEMETRY_CHANNELS.includes(telemetryChannel)) {
-  throw new Error(
-    `T3CODE_TELEMETRY_CHANNEL must be one of ${TELEMETRY_CHANNELS.join(", ")}, got "${telemetryChannel}".`,
-  );
-}
 
 // `build:exe` wraps the same bundle in a Node single-executable. tsdown's exe
 // step refuses multi-chunk output and counts the sourcemap as a chunk, and the
@@ -101,7 +91,6 @@ export default mergeConfig(
       },
       define: {
         __T3CODE_BUILD_CHANNEL__: JSON.stringify(cliBuildChannel),
-        __T3CODE_TELEMETRY_CHANNEL__: JSON.stringify(telemetryChannel),
       },
     },
     test: {

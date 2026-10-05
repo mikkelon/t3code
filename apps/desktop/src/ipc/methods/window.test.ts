@@ -20,11 +20,7 @@ vi.mock("electron", () => ({
 import * as DesktopBackendConfiguration from "../../backend/DesktopBackendConfiguration.ts";
 import * as DesktopBackendManager from "../../backend/DesktopBackendManager.ts";
 import * as DesktopBackendPool from "../../backend/DesktopBackendPool.ts";
-import {
-  getLocalEnvironmentBootstraps,
-  getRelayTelemetryEnabled,
-  probeRemoteEditors,
-} from "./window.ts";
+import { getLocalEnvironmentBootstraps, probeRemoteEditors } from "./window.ts";
 
 const readyWslConfig: DesktopBackendManager.DesktopBackendStartConfig = {
   executablePath: "wsl.exe",
@@ -171,25 +167,6 @@ describe("getLocalEnvironmentBootstraps", () => {
       assert.deepEqual(result, []);
     }).pipe(Effect.provide(bootstrapsLayer([stoppedInstance])));
   });
-});
-
-describe("getRelayTelemetryEnabled", () => {
-  it.effect("reads the desktop host opt-out before returning the renderer policy", () =>
-    Effect.gen(function* () {
-      assert.isFalse(
-        yield* getRelayTelemetryEnabled.handler().pipe(
-          Effect.provideService(HostProcess.Environment, {
-            T3CODE_TELEMETRY_ENABLED: "false",
-          }),
-        ),
-      );
-      assert.isTrue(
-        yield* getRelayTelemetryEnabled
-          .handler()
-          .pipe(Effect.provideService(HostProcess.Environment, {})),
-      );
-    }),
-  );
 });
 
 it.effect.skipIf(HostProcess.Platform.defaultValue() === "win32")(
