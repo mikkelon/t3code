@@ -33,6 +33,8 @@ export interface UpdatesHarnessOptions {
   readonly quitAndInstall?: Effect.Effect<void, ElectronUpdater.ElectronUpdaterQuitAndInstallError>;
   readonly stopBackend?: Effect.Effect<void>;
   readonly startBackend?: Effect.Effect<void>;
+  /** False for a primary that never started, as when the app adopted the background service. */
+  readonly backendRunning?: boolean;
   readonly env?: Record<string, string | undefined>;
   readonly platform?: NodeJS.Platform;
   /** Contents of the resources/package-type marker a Linux package ships. */
@@ -137,7 +139,7 @@ export function makeHarness(options: UpdatesHarnessOptions = {}) {
     stop: () => options.stopBackend ?? Effect.void,
     currentConfig: Effect.succeedNone,
     snapshot: Effect.succeed({
-      desiredRunning: false,
+      desiredRunning: options.backendRunning ?? true,
       ready: false,
       activePid: Option.none(),
       restartAttempt: 0,
@@ -202,6 +204,7 @@ export function makeHarness(options: UpdatesHarnessOptions = {}) {
           setWslBackendEnabled: () => Effect.die("unexpected WSL backend toggle"),
           setWslDistro: () => Effect.die("unexpected WSL distro change"),
           setLocalEnvironmentEnabled: () => Effect.die("unexpected local environment toggle"),
+          setBackgroundServiceDisabled: () => Effect.die("unexpected background service toggle"),
           setWslOnly: () => Effect.die("unexpected WSL-only toggle"),
           applyWslWindowsFallback: Effect.die("unexpected WSL Windows fallback"),
           applyWslWindowsFallbackInMemory: Effect.die("unexpected WSL Windows fallback"),

@@ -22,6 +22,7 @@ vi.mock("electron", () => ({
 import * as DesktopBackendConfiguration from "../../backend/DesktopBackendConfiguration.ts";
 import * as DesktopBackendManager from "../../backend/DesktopBackendManager.ts";
 import * as DesktopBackendPool from "../../backend/DesktopBackendPool.ts";
+import * as DesktopBackgroundService from "../../backend/DesktopBackgroundService.ts";
 import * as ElectronDialog from "../../electron/ElectronDialog.ts";
 import * as ElectronWindow from "../../electron/ElectronWindow.ts";
 import * as DesktopAppSettings from "../../settings/DesktopAppSettings.ts";
@@ -82,8 +83,15 @@ const backendConfigurationLayer = Layer.succeed(
   } satisfies DesktopBackendConfiguration.DesktopBackendConfiguration["Service"],
 );
 
-const bootstrapsLayer = (instances: ReadonlyArray<DesktopBackendManager.DesktopBackendInstance>) =>
-  Layer.merge(DesktopBackendPool.layerTest([...instances]), backendConfigurationLayer);
+const bootstrapsLayer = (
+  instances: ReadonlyArray<DesktopBackendManager.DesktopBackendInstance>,
+  layerBackgroundService = DesktopBackgroundService.layerTest(),
+) =>
+  Layer.mergeAll(
+    DesktopBackendPool.layerTest([...instances]),
+    backendConfigurationLayer,
+    layerBackgroundService,
+  );
 
 describe("getLocalEnvironmentBootstraps", () => {
   it.effect("publishes the concrete running distro without replacing the stable instance id", () =>
@@ -101,6 +109,45 @@ describe("getLocalEnvironmentBootstraps", () => {
         },
       ]);
     }).pipe(Effect.provide(bootstrapsLayer([defaultWslInstance]))),
+  );
+
+  it.effect("publishes an adopted background service as the primary environment", () =>
+    Effect.gen(function* () {
+      const result = yield* getLocalEnvironmentBootstraps.handler();
+
+      assert.deepEqual(result, [
+        {
+          id: "primary",
+          label: "Background service",
+          runningDistro: null,
+          httpBaseUrl: "http://127.0.0.1:3773/",
+          wsBaseUrl: "ws://127.0.0.1:3773/",
+          backgroundService: true,
+        },
+        {
+          id: "wsl:default",
+          label: "WSL (Ubuntu)",
+          runningDistro: "Ubuntu",
+          httpBaseUrl: "http://127.0.0.1:3774/",
+          wsBaseUrl: "ws://127.0.0.1:3774/",
+          bootstrapToken: "bootstrap-token",
+        },
+      ]);
+    }).pipe(
+      Effect.provide(
+        bootstrapsLayer(
+          [defaultWslInstance],
+          DesktopBackgroundService.layerTest({
+            adopted: Effect.succeedSome({
+              httpBaseUrl: new URL("http://127.0.0.1:3773"),
+              environmentId: "env-home",
+              serverVersion: "1.2.3",
+              serviceManaged: true,
+            }),
+          }),
+        ),
+      ),
+    ),
   );
 
   it.effect("hands out the current window's token to a backend launched with the secret", () =>
