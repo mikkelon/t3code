@@ -7,6 +7,7 @@ import * as Scope from "effect/Scope";
 
 import type * as Electron from "electron";
 
+import * as DesktopBackgroundService from "../backend/DesktopBackgroundService.ts";
 import * as DesktopEnvironment from "./DesktopEnvironment.ts";
 import { makeComponentLogger } from "./DesktopObservability.ts";
 import * as DesktopShutdown from "./DesktopShutdown.ts";
@@ -38,10 +39,11 @@ export type DesktopLifecycleRuntimeServices =
 
 type DesktopLifecycleRegistrationServices =
   | DesktopLifecycleRuntimeServices
+  | DesktopBackgroundService.DesktopBackgroundService
   | ElectronWindow.ElectronWindow;
 
 /**
- * @effect-expect-leaking DesktopEnvironment | DesktopShutdown | DesktopState | DesktopWindow | ElectronApp | ElectronTheme | ElectronWindow
+ * @effect-expect-leaking DesktopBackgroundService | DesktopEnvironment | DesktopShutdown | DesktopState | DesktopWindow | ElectronApp | ElectronTheme | ElectronWindow
  */
 export class DesktopLifecycle extends Context.Service<
   DesktopLifecycle,
@@ -116,6 +118,13 @@ function handleBeforeQuit(
   event.preventDefault();
   void runEffect(
     Effect.gen(function* () {
+      // Running agents may be handed to the background service first; a
+      // cancelled quit leaves the app untouched.
+      if (!(yield* (yield* DesktopBackgroundService.DesktopBackgroundService).confirmQuit)) {
+        // Closing the last window started this quit on Linux and Windows.
+        yield* (yield* DesktopWindow.DesktopWindow).activate.pipe(Effect.ignore);
+        return false;
+      }
       const state = yield* DesktopState.DesktopState;
       const electronWindow = yield* ElectronWindow.ElectronWindow;
       yield* Ref.set(state.quitting, true);
@@ -127,16 +136,23 @@ function handleBeforeQuit(
           ),
         ),
       );
+      return true;
     }).pipe(Effect.withSpan("desktop.lifecycle.beforeQuit")),
-  ).finally(() => {
-    markQuitAllowed();
-    void runEffect(
-      Effect.gen(function* () {
-        const electronApp = yield* ElectronApp.ElectronApp;
-        yield* electronApp.quit;
-      }).pipe(Effect.withSpan("desktop.lifecycle.quitAfterShutdown")),
-    );
-  });
+  )
+    .then(
+      (proceed) => proceed,
+      () => true,
+    )
+    .then((proceed) => {
+      if (!proceed) return;
+      markQuitAllowed();
+      void runEffect(
+        Effect.gen(function* () {
+          const electronApp = yield* ElectronApp.ElectronApp;
+          yield* electronApp.quit;
+        }).pipe(Effect.withSpan("desktop.lifecycle.quitAfterShutdown")),
+      );
+    });
 }
 
 function quitFromSignal(
