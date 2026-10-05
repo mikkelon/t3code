@@ -7,7 +7,6 @@ import {
 } from "@t3tools/contracts";
 import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
-import * as Exit from "effect/Exit";
 import * as Fiber from "effect/Fiber";
 import * as Ref from "effect/Ref";
 
@@ -50,27 +49,6 @@ it.effect("starts without scanning or rebuilding projection history", () =>
       bootstrap: { projectId: "project-1" },
     });
   }),
-);
-
-it.effect("interrupts the effect worker when awareness relay startup fails", () =>
-  Effect.scoped(
-    Effect.gen(function* () {
-      const workerInterrupted = yield* Ref.make(false);
-      const workerFiberRef = yield* Ref.make<Fiber.Fiber<void, never> | null>(null);
-
-      const exit = yield* ServerRuntimeStartup.startEffectWorkerWithRelay({
-        runWorker: Effect.never.pipe(Effect.ensuring(Ref.set(workerInterrupted, true))),
-        startRelay: Effect.yieldNow.pipe(
-          Effect.andThen(Effect.die("awareness relay startup failed")),
-        ),
-        workerFiberRef,
-      }).pipe(Effect.exit);
-
-      assert.isTrue(Exit.isFailure(exit));
-      assert.isTrue(yield* Ref.get(workerInterrupted));
-      assert.isNull(yield* Ref.get(workerFiberRef));
-    }),
-  ),
 );
 
 it.effect("queues commands until startup signals readiness", () =>

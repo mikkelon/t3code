@@ -20,6 +20,7 @@ describe("provider auth return destinations", () => {
     "t3code://user@ app/welcome",
     "t3code://app/welcome/../evil",
     "https://attacker.example/welcome",
+    "https://app.t3.codes/welcome",
     "file:///welcome",
     "javascript:alert(1)",
   ])("rejects %s", (url) => expect(providerAuthReturnUrl(url)).toBeUndefined());

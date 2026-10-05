@@ -454,8 +454,8 @@ export const make = Effect.fn("LocalDeviceHost.make")(function* () {
     );
 
   /**
-   * Restart the hub when it dies under us, with the same doubling backoff the
-   * relay connector uses so a hub that crashes on boot cannot spin.
+   * Restart the hub when it dies under us, with a doubling backoff so a hub
+   * that crashes on boot cannot spin.
    */
   const superviseHub = (hub: HubProcess, hubTool: DeviceToolPaths): Effect.Effect<void> =>
     Effect.gen(function* () {
