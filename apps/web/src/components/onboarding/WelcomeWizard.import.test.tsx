@@ -47,14 +47,11 @@ vi.mock("../../rpc/atomRegistry", () => ({
     return state.registry;
   },
 }));
-vi.mock("@clerk/react", () => ({ useAuth: () => ({ isLoaded: true, isSignedIn: false }) }));
 vi.mock("../../hooks/useTheme", () => ({ mountOnboardingTheme: () => () => {} }));
 vi.mock("../../hooks/useLocalStorage", () => ({ useLocalStorage: () => [false, () => {}] }));
 vi.mock("../../hooks/useCopyToClipboard", () => ({
   useCopyToClipboard: () => ({ copyToClipboard: vi.fn(), copied: false }),
 }));
-vi.mock("../../cloud/publicConfig", () => ({ hasCloudPublicConfig: () => false }));
-vi.mock("../clerk/useT3ConnectAuthPrompt", () => ({ useT3ConnectAuthPrompt: vi.fn() }));
 vi.mock("../../onboarding/firstRun", () => ({
   useCompleteOnboarding: () => state.completeOnboarding,
 }));
@@ -126,7 +123,6 @@ vi.mock("../../state/use-atom-command", () => ({
 }));
 vi.mock("../../state/terminal", () => ({ terminalEnvironment: {} }));
 vi.mock("../ThreadTerminalDrawer", () => ({ TerminalViewport: "div" }));
-vi.mock("../cloud/CloudEnvironmentConnectList", () => ({ CloudEnvironmentConnectRows: "div" }));
 vi.mock("../settings/ChatGptWelcomeCoordinator", () => ({ ChatGptWelcomeCoordinator: () => null }));
 vi.mock("../settings/CodexSetupSection", () => ({
   CodexSetupSection: () => null,

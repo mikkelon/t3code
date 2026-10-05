@@ -15,7 +15,7 @@ import {
   failEnvironmentNotFound,
   requireEnvironmentScope,
 } from "../auth/http.ts";
-import { traceLocalHandlerWork } from "../cloud/traceRelayRequest.ts";
+import { withLocalTracing as traceLocalHandlerWork } from "@t3tools/shared/relayTracing";
 import * as OrchestrationEventStore from "../persistence/OrchestrationEventStore.ts";
 import * as ProjectEnrichmentService from "../project/ProjectEnrichmentService.ts";
 import {

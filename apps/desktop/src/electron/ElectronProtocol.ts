@@ -56,7 +56,6 @@ export class ElectronProtocolUnregistrationError extends Schema.TaggedError<Elec
 // built client from disk (`assetDirectory`).
 export type DesktopProtocolRegistrationInput = {
   readonly scheme: string;
-  readonly clerkFrontendApiHostname: string | undefined;
 } & ({ readonly targetOrigin: URL } | { readonly assetDirectory: string });
 
 export class ElectronProtocol extends Context.Service<
@@ -69,19 +68,10 @@ export class ElectronProtocol extends Context.Service<
 >()("@t3tools/desktop/electron/ElectronProtocol") {}
 
 export function makeDesktopContentSecurityPolicy(input: DesktopProtocolRegistrationInput): string {
-  const clerkOrigin = input.clerkFrontendApiHostname
-    ? `https://${input.clerkFrontendApiHostname}`
-    : undefined;
-  const scriptSources = [
-    "'self'",
-    "'unsafe-inline'",
-    "'wasm-unsafe-eval'",
-    ...(clerkOrigin ? [clerkOrigin] : []),
-    "https://challenges.cloudflare.com",
-  ];
+  const scriptSources = ["'self'", "'unsafe-inline'", "'wasm-unsafe-eval'"];
 
   // The renderer connects directly to user-configured environments in addition to
-  // the build-configured Clerk, relay, and OTLP endpoints. Those environment
+  // user-configured OTLP endpoints. Those environment
   // origins are not known when this response policy is created, so restrict
   // connections by the network schemes the client supports instead of by host.
   // GLTFLoader fetches embedded textures through blob URLs after parsing the model.
