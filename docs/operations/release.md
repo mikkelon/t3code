@@ -2,6 +2,10 @@
 
 > For maintainers. Using T3 Code? See [docs/user](../user/).
 
+> **This fork:** the rest of this page describes upstream's pipeline. `release.yml` no longer
+> triggers here and the preview workflows are removed. Fork releases are built by
+> `.github/workflows/fork-release.yml`; see [Maintaining the fork](../../README.md#maintaining-the-fork).
+
 This document covers the unified release workflow for stable and nightly desktop releases.
 
 ## What the workflow does
@@ -290,18 +294,6 @@ The job looks up the `t3code-marketing` project using the existing `VERCEL_TOKEN
 and `VERCEL_ORG_ID` secrets. It also respects the optional `VERCEL_TEAM_SLUG`
 variable. The Vercel project's root directory must be `apps/marketing`.
 Git deployments remain disabled in `apps/marketing/vercel.ts`.
-
-## Android APK mirror
-
-`.github/workflows/mobile-android-apk.yml` checks Google Play hourly and publishes the newest
-build on the `v2` closed testing track to the rolling `android-nightly` prerelease, for nightly
-users who can't join the Play testing group. Those v2-preview builds are the only Android builds that can
-connect to a nightly server. The APK is the universal APK Play generates and signs from the
-uploaded bundle, so no signing key lives in GitHub. The job skips itself until
-`GOOGLE_PLAY_SERVICE_ACCOUNT_JSON` holds a Play service account key with the "Release to
-production, exclude devices, and use Play App Signing" permission, which downloading generated
-APKs requires. The job reads tracks without opening a Play edit, so it can share the service
-account EAS Submit uses.
 
 ## Hosted web app release deployment
 
