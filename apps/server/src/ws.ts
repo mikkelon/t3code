@@ -177,6 +177,7 @@ import * as ProviderAuthService from "./provider/ProviderAuthService.ts";
 import * as ProviderInstallation from "./provider/providerInstallation.ts";
 import * as ServerSelfUpdate from "./cloud/selfUpdate.ts";
 import * as NpmRelease from "./cloud/npmRelease.ts";
+import * as TailscaleServe from "./tailscaleServe.ts";
 import * as ServerLifecycleEvents from "./serverLifecycleEvents.ts";
 import * as ServerRuntimeStartup from "./serverRuntimeStartup.ts";
 import * as SecretResolver from "@t3tools/secret-provider-core/server/SecretResolver";
@@ -1505,6 +1506,7 @@ export const layerWsRpc = (
       const providerInstallation = yield* ProviderInstallation.ProviderInstallation;
       const serverSelfUpdate = yield* ServerSelfUpdate.ServerSelfUpdate;
       const npmRelease = yield* NpmRelease.NpmRelease;
+      const tailscaleServe = yield* TailscaleServe.TailscaleServe;
       const config = yield* ServerConfig.ServerConfig;
       const lifecycleEvents = yield* ServerLifecycleEvents.ServerLifecycleEvents;
       const storageCleanup = yield* StorageCleanup.StorageCleanup;
@@ -2610,7 +2612,11 @@ export const layerWsRpc = (
           ),
         [WS_METHODS.serverUpdateSettings]:
           /* Request instrumentation already owns the span; keep this helper in that context. */
-          Effect.fnUntraced(function* ({ patch, providerInstanceMutation }) {
+          Effect.fnUntraced(function* ({
+            // Network exposure needs access:write, which server.setTailscaleServe checks.
+            patch: { tailscaleServe: _tailscaleServe, ...patch },
+            providerInstanceMutation,
+          }) {
             const deviceHosts = patch.deviceHosts
               ? yield* remoteSshDeviceHosts(patch.deviceHosts).pipe(
                   Effect.provide(deviceHostContext),
@@ -2622,6 +2628,8 @@ export const layerWsRpc = (
               : serverSettings.updateProviderInstance(providerInstanceMutation, nextPatch);
             return ServerSettings.redactServerSettingsForClient(settings, settingsClient);
           }),
+        [WS_METHODS.serverGetTailscaleServe]: (_input) => tailscaleServe.state,
+        [WS_METHODS.serverSetTailscaleServe]: (input) => tailscaleServe.set(input),
         [WS_METHODS.serverDiscoverSourceControl]: (_input) => sourceControlDiscovery.discover,
         [WS_METHODS.serverGetTraceDiagnostics]: (_input) =>
           TraceDiagnostics.readTraceDiagnostics({
@@ -3431,6 +3439,7 @@ export const layer = Layer.unwrap(
     const serverBrowser = yield* ServerBrowser.ServerBrowser;
     const serverSelfUpdate = yield* ServerSelfUpdate.ServerSelfUpdate;
     const npmRelease = yield* NpmRelease.NpmRelease;
+    const tailscaleServe = yield* TailscaleServe.TailscaleServe;
     const pullRequests = yield* PullRequestService.PullRequestService;
     const reviewGuides = yield* PullRequestReviewGuideService.PullRequestReviewGuideService;
     const peerLinks = yield* PeerLinks.PeerLinks;
@@ -3513,6 +3522,7 @@ export const layer = Layer.unwrap(
               Layer.provide(ProviderMaintenanceRunner.layer),
               Layer.provide(Layer.succeed(NpmRelease.NpmRelease, npmRelease)),
               Layer.provide(Layer.succeed(ServerSelfUpdate.ServerSelfUpdate, serverSelfUpdate)),
+              Layer.provide(Layer.succeed(TailscaleServe.TailscaleServe, tailscaleServe)),
               // Share server-lifetime PR caches so WS mutations invalidate every client's HTTP diffs.
               Layer.provide(Layer.succeed(PullRequestService.PullRequestService, pullRequests)),
               Layer.provide(OtlpEndpointCheck.layer),
