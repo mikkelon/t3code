@@ -52,6 +52,7 @@ import {
   ProviderDriverKind,
 } from "./providerInstance.ts";
 import { PullRequestMergeMethod } from "./pullRequest.ts";
+import { TailscaleServeHttpsPort } from "./remoteAccess.ts";
 import {
   CloudSpeechModelId,
   SpeechAcceleration,
@@ -1330,6 +1331,12 @@ export const CloudSpeechCredentials = Schema.Struct({
   openrouter: CloudSpeechCredential,
 });
 
+export const TailscaleServeSettings = Schema.Struct({
+  enabled: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
+  port: TailscaleServeHttpsPort.pipe(Schema.withDecodingDefault(Effect.succeed(443 as const))),
+});
+export type TailscaleServeSettings = typeof TailscaleServeSettings.Type;
+
 export const ServerSettings = Schema.Struct({
   // Null means unmigrated; empty is authoritative and must not resurrect cleared preferences.
   favorites: Schema.NullOr(ModelFavorites).pipe(Schema.withDecodingDefault(Effect.succeed(null))),
@@ -1463,6 +1470,15 @@ export const ServerSettings = Schema.Struct({
   ),
   backgroundActivityProfile: BackgroundActivityProfile.pipe(
     Schema.withDecodingDefault(Effect.succeed(DEFAULT_BACKGROUND_ACTIVITY_PROFILE)),
+  ),
+  /**
+   * Publish this server over Tailscale Serve HTTPS. Survives restarts, so a
+   * background service keeps its tailnet URL. Changed only through
+   * `server.setTailscaleServe`, which needs access:write, never the generic
+   * settings update.
+   */
+  tailscaleServe: TailscaleServeSettings.pipe(
+    Schema.withDecodingDefault(Effect.succeed(Schema.decodeSync(TailscaleServeSettings)({}))),
   ),
   defaultTheme: DefaultThemePreference.pipe(Schema.withDecodingDefault(Effect.succeed(""))),
   /** Distinguishes repeated sets of the same theme so clients apply each one. */
@@ -1928,6 +1944,8 @@ export const ServerSettingsPatch = Schema.Struct({
   usageModelAliases: Schema.optionalKey(
     Schema.Record(TrimmedNonEmptyString, Schema.NullOr(TrimmedNonEmptyString)),
   ),
+  /** Server-internal: `server.updateSettings` drops it; see `ServerSettings.tailscaleServe`. */
+  tailscaleServe: Schema.optionalKey(TailscaleServeSettings),
 });
 export type ServerSettingsPatch = typeof ServerSettingsPatch.Type;
 
