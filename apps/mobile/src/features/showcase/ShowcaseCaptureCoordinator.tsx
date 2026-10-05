@@ -29,7 +29,6 @@ import {
   buildShowcasePendingTasks,
   SHOWCASE_PENDING_TASK_DEFINITIONS,
 } from "./showcasePendingTasks";
-import { buildShowcaseAgentActivity } from "./showcaseAgentActivity";
 import { retryShowcaseOperation } from "./showcaseRetry";
 import {
   clearShowcaseRenderSignal,
@@ -37,7 +36,6 @@ import {
   isShowcaseNativeContentReady,
   subscribeToShowcaseRenderSignal,
 } from "./showcaseRenderSignal";
-import { stageShowcaseAgentActivity } from "./stageShowcaseAgentActivity";
 
 const SHOWCASE_ENABLED = process.env.EXPO_PUBLIC_SHOWCASE === "1";
 const SHOWCASE_THREAD_ID = "remote-command-center";
@@ -82,14 +80,7 @@ function EnabledShowcaseCaptureCoordinator(props: { readonly pathname: string })
   const [themeRequestSettled, setThemeRequestSettled] = useState(false);
   const [readyScene, setReadyScene] = useState<ShowcaseScene | null>(null);
   const [orientationSettled, setOrientationSettled] = useState(false);
-  const [agentActivityStaged, setAgentActivityStaged] = useState(false);
   const requestedSceneRef = useRef<ShowcaseScene | null>(null);
-  // Staging reads the latest entities without restarting on every shell
-  // update, which would re-enter a permission prompt that is still open.
-  const entitiesRef = useRef({ threads, projects });
-  useEffect(() => {
-    entitiesRef.current = { threads, projects };
-  }, [projects, threads]);
   const renderSignal = useSyncExternalStore(
     subscribeToShowcaseRenderSignal,
     getShowcaseRenderSignal,
@@ -139,7 +130,6 @@ function EnabledShowcaseCaptureCoordinator(props: { readonly pathname: string })
       // A native draw belongs only to the scene request that produced it. In
       // particular, revisiting review must wait for its newly mounted surface.
       clearShowcaseRenderSignal();
-      setAgentActivityStaged(false);
       setRequestedScene(value);
     };
     readRequestedScene();
@@ -179,9 +169,7 @@ function EnabledShowcaseCaptureCoordinator(props: { readonly pathname: string })
     };
   }, [connectPairingUrl, pairingUrls]);
 
-  const routeScene = sceneFromPathname(props.pathname);
-  const scene =
-    requestedScene === "agent-activity" && routeScene === "threads" ? "agent-activity" : routeScene;
+  const scene = sceneFromPathname(props.pathname);
   const hasServerFixture =
     workspace.state.hasReadyEnvironment &&
     workspace.environments.length >= 3 &&
@@ -233,10 +221,6 @@ function EnabledShowcaseCaptureCoordinator(props: { readonly pathname: string })
       navigation.dispatch(StackActions.popToTop());
       return;
     }
-    if (requestedScene === "agent-activity") {
-      navigation.dispatch(CommonActions.reset({ index: 0, routes: [{ name: "Home" }] }));
-      return;
-    }
     const routes: ShowcaseResetRoute[] = [{ name: "Home" }];
     if (requestedScene === "environments") {
       routes.push({
@@ -274,36 +258,6 @@ function EnabledShowcaseCaptureCoordinator(props: { readonly pathname: string })
   }, [hasFixture, navigation, requestedScene, scene, showcaseThread]);
 
   useEffect(() => {
-    if (scene !== "agent-activity" || !hasFixture || agentActivityStaged) {
-      return;
-    }
-    let cancelled = false;
-    let lastOutcome: string | null = null;
-    void retryShowcaseOperation(
-      async () => {
-        const now = Date.now();
-        const { threads: latestThreads, projects: latestProjects } = entitiesRef.current;
-        const activity = buildShowcaseAgentActivity(latestThreads, latestProjects, now);
-        const outcome =
-          activity === null
-            ? "fixture threads not loaded"
-            : await stageShowcaseAgentActivity(activity, now);
-        if (outcome === true) return true;
-        if (outcome !== lastOutcome)
-          console.warn(`[showcase] agent activity not staged: ${outcome}`);
-        lastOutcome = outcome;
-        return false;
-      },
-      { isCancelled: () => cancelled, attemptTimeoutMs: 60_000 },
-    ).then((staged) => {
-      if (!cancelled && staged) setAgentActivityStaged(true);
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, [agentActivityStaged, hasFixture, scene]);
-
-  useEffect(() => {
     if (
       scene === null ||
       requestedScene === null ||
@@ -311,7 +265,6 @@ function EnabledShowcaseCaptureCoordinator(props: { readonly pathname: string })
       !hasFixture ||
       !orientationSettled ||
       !themeApplied ||
-      (scene === "agent-activity" && !agentActivityStaged) ||
       !isShowcaseNativeContentReady({ scene, themeId, renderSignal })
     ) {
       setReadyScene(null);
@@ -334,16 +287,7 @@ function EnabledShowcaseCaptureCoordinator(props: { readonly pathname: string })
       if (renderFrame !== null) cancelAnimationFrame(renderFrame);
       if (readyFrame !== null) cancelAnimationFrame(readyFrame);
     };
-  }, [
-    agentActivityStaged,
-    hasFixture,
-    orientationSettled,
-    renderSignal,
-    requestedScene,
-    scene,
-    themeApplied,
-    themeId,
-  ]);
+  }, [hasFixture, orientationSettled, renderSignal, requestedScene, scene, themeApplied, themeId]);
 
   if (readyScene === null) return null;
 

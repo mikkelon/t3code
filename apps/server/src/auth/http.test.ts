@@ -162,7 +162,7 @@ it.effect("sets the selected browser session cookies through the HTTP route", ()
   }).pipe(Effect.provide(NodeServices.layer)),
 );
 
-it.effect("exports only verified T3 Connect requests", () =>
+it.effect("never exports a request to the relay tracer, even for a legacy T3 Connect session", () =>
   Effect.gen(function* () {
     const productSpans: Array<string> = [];
     const localSpans: Array<string> = [];
@@ -217,12 +217,8 @@ it.effect("exports only verified T3 Connect requests", () =>
       );
 
     yield* handle("DPoP connect");
-    expect(productSpans).toEqual([
-      "environment.relay.request",
-      "EnvironmentAuth.authenticateHttpRequest",
-      "environment.handler",
-    ]);
-    expect(localSpans).toEqual(["EnvironmentAuth.authenticateHttpRequest"]);
+    expect(productSpans).toEqual([]);
+    expect(localSpans).toEqual(["EnvironmentAuth.authenticateHttpRequest", "environment.handler"]);
 
     productSpans.length = 0;
     localSpans.length = 0;

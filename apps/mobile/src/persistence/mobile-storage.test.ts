@@ -43,12 +43,11 @@ describe("mobile device identity", () => {
     Effect.gen(function* () {
       const storage = yield* makeStorage;
       const deviceIds = yield* Effect.all(
-        [storage.loadOrCreateAgentAwarenessDeviceId, storage.loadOrCreateAgentAwarenessDeviceId],
+        [storage.loadOrCreateDeviceId, storage.loadOrCreateDeviceId],
         { concurrency: "unbounded" },
       );
 
       expect(deviceIds).toEqual(["generated-device-1", "generated-device-1"]);
-      expect(yield* storage.loadAgentAwarenessDeviceId).toBe(deviceIds[0]);
       expect(values.get(deviceIdKey)).toBe(deviceIds[0]);
       expect(uuidv4).toHaveBeenCalledTimes(1);
       expect(setItemAsync).toHaveBeenCalledTimes(1);
@@ -60,7 +59,7 @@ describe("mobile device identity", () => {
       values.set(deviceIdKey, "existing-device");
       const storage = yield* makeStorage;
 
-      expect(yield* storage.loadOrCreateAgentAwarenessDeviceId).toBe("existing-device");
+      expect(yield* storage.loadOrCreateDeviceId).toBe("existing-device");
       expect(uuidv4).not.toHaveBeenCalled();
       expect(setItemAsync).not.toHaveBeenCalled();
     }),
@@ -70,15 +69,15 @@ describe("mobile device identity", () => {
     Effect.gen(function* () {
       setItemAsync.mockRejectedValueOnce(new Error("Secure storage unavailable"));
       const storage = yield* makeStorage;
-      const first = yield* Effect.result(storage.loadOrCreateAgentAwarenessDeviceId);
+      const first = yield* Effect.result(storage.loadOrCreateDeviceId);
 
       expect(first).toMatchObject({
         _tag: "Failure",
         failure: { _tag: "MobileSecureStorageError", operation: "write", key: deviceIdKey },
       });
-      expect(yield* storage.loadAgentAwarenessDeviceId).toBeNull();
-      expect(yield* storage.loadOrCreateAgentAwarenessDeviceId).toBe("generated-device-2");
-      expect(yield* storage.loadAgentAwarenessDeviceId).toBe("generated-device-2");
+      expect(values.get(deviceIdKey)).toBeUndefined();
+      expect(yield* storage.loadOrCreateDeviceId).toBe("generated-device-2");
+      expect(values.get(deviceIdKey)).toBe("generated-device-2");
       expect(uuidv4).toHaveBeenCalledTimes(2);
     }),
   );

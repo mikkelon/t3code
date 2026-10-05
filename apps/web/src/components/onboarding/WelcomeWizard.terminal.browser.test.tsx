@@ -116,10 +116,6 @@ vi.mock(import("../../onboarding/firstRun"), async (original) => ({
   ...(await original()),
   completeOnboarding: state.complete,
 }));
-vi.mock(import("../../cloud/publicConfig"), async (original) => ({
-  ...(await original()),
-  hasCloudPublicConfig: () => false,
-}));
 vi.mock(import("../settings/ChatGptWelcomeCoordinator"), async (original) => ({
   ...(await original()),
   ChatGptWelcomeCoordinator: () => <></>,

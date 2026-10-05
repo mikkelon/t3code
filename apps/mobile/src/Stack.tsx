@@ -47,9 +47,6 @@ import {
   type RenderFailureProps,
 } from "./components/RenderErrorBoundary";
 import { ArchivedThreadsRouteScreen } from "./features/archive/ArchivedThreadsRouteScreen";
-import { useAgentNotificationNavigation } from "./features/agent-awareness/notificationNavigation";
-import { ConnectOnboardingRouteScreen } from "./features/cloud/ConnectOnboardingRouteScreen";
-import { useConnectOnboardingNavigation } from "./features/cloud/connectOnboardingNavigation";
 import { AttachmentFileScreen } from "./features/files/AttachmentFileScreen";
 import { ThreadFilesTreeScreen, ThreadFileScreen } from "./features/files/ThreadFilesRouteScreen";
 import { AdaptiveWorkspaceLayout } from "./features/layout/AdaptiveWorkspaceLayout";
@@ -95,7 +92,6 @@ import { SettingsAppearanceRouteScreen } from "./features/settings/SettingsAppea
 import { SettingsClientStorageRouteScreen } from "./features/settings/SettingsClientStorageRouteScreen";
 import { SettingsDiagnosticsRouteScreen } from "./features/diagnostics/SettingsDiagnosticsRouteScreen";
 import { SettingsProviderAccountsRouteScreen } from "./features/settings/SettingsProviderAccountsRouteScreen";
-import { SettingsAuthRouteScreen } from "./features/settings/SettingsAuthRouteScreen";
 import { SettingsEnvironmentDetailRouteScreen } from "./features/settings/SettingsEnvironmentDetailRouteScreen";
 import { SettingsEnvironmentsRouteScreen } from "./features/settings/SettingsEnvironmentsRouteScreen";
 import { SettingsFollowUpRouteScreen } from "./features/settings/SettingsFollowUpRouteScreen";
@@ -127,7 +123,6 @@ import { SettingsProjectOverviewRouteScreen } from "./features/settings/Settings
 import { UsageLimitAccountScreen } from "./features/usage/UsageLimitsPooled";
 import { UsageRouteScreen } from "./features/usage/UsageRouteScreen";
 import { SettingsAboutRouteScreen } from "./features/settings/SettingsAboutRouteScreen";
-import { SettingsNotificationsRouteScreen } from "./features/settings/SettingsNotificationsRouteScreen";
 import { SettingsRouteScreen } from "./features/settings/SettingsRouteScreen";
 import { SettingsThreadsRouteScreen } from "./features/settings/SettingsThreadsRouteScreen";
 import { SettingsEnvironmentFilterProvider } from "./features/settings/settings-environment-filter";
@@ -255,11 +250,6 @@ const SettingsContentStack = createV5SheetStackNavigator({
       screen: SettingsEnvironmentMaintenanceRouteScreen,
       linking: "maintenance",
       options: { title: "Maintenance" },
-    }),
-    SettingsNotifications: createNativeStackScreen({
-      screen: SettingsNotificationsRouteScreen,
-      linking: "notifications",
-      options: { title: "Notifications" },
     }),
     SettingsThreads: createNativeStackScreen({
       screen: SettingsThreadsRouteScreen,
@@ -430,14 +420,6 @@ const SettingsSheetStack = createV5SheetStackNavigator({
         </SettingsEnvironmentFilterProvider>
       ),
     }),
-    SettingsAuth: createNativeStackScreen({
-      screen: SettingsAuthRouteScreen,
-      linking: "auth",
-    }),
-    SettingsWaitlist: createNativeStackScreen({
-      screen: SettingsAuthRouteScreen,
-      linking: "waitlist",
-    }),
   },
 });
 
@@ -540,7 +522,6 @@ const NewTaskSheetStack = createNativeStackNavigator({
 const WORKSPACE_OVERLAY_ROUTES = new Set([
   "PullRequestReview",
   "PullRequestInlineComment",
-  "ConnectOnboarding",
   "Connections",
   "ConnectionsNew",
   "GitBranches",
@@ -592,8 +573,6 @@ function RootStackLayout(props: {
   const path = getPathFromState(props.state, navigationPathConfig);
   const pathname = path.startsWith("/") ? path : `/${path}`;
   const workspaceLocation = workspaceLocationFromState(props.state);
-  useAgentNotificationNavigation(workspaceLocation.pathname);
-  useConnectOnboardingNavigation();
   useAppShortcuts(props.state);
   useEffect(() => {
     const topRouteName = props.state.routes[props.state.index]?.name;
@@ -924,20 +903,6 @@ const RootStackConfig = createWorkspaceStackNavigator({
       options: {
         ...LEGAL_DOCUMENT_HEADER_OPTIONS,
         title: "Legal",
-      },
-    }),
-    ConnectOnboarding: createNativeStackScreen({
-      screen: ConnectOnboardingRouteScreen,
-      linking: "connect-onboarding",
-      options: {
-        // A root-level Android formSheet does not host the native stack bar;
-        // the route renders an embedded AndroidSheetHeader instead.
-        ...(Platform.OS === "android" ? { headerShown: false } : SHEET_SOLID_HEADER_OPTIONS),
-        title: "Set up T3 Connect",
-        gestureEnabled: true,
-        ...FORM_SHEET_PRESENTATION_OPTIONS,
-        sheetAllowedDetents: [0.6, 0.95],
-        sheetGrabberVisible: true,
       },
     }),
     Connections: createNativeStackScreen({

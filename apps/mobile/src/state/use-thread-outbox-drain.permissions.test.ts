@@ -130,7 +130,6 @@ vi.mock("./use-composer-drafts", async () => {
   const { Atom } = await import("effect/reactivity");
   return {
     composerDraftsAtom: Atom.make({}),
-    removeDeliveredCloudQueuedMessage: async () => {},
     appendComposerDraftAttachments: vi.fn(),
     flushComposerDrafts: vi.fn(),
     getComposerDraftSnapshot: vi.fn(() => ({ text: state.draftText, attachments: [] })),

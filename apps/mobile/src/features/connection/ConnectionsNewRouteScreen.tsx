@@ -1,6 +1,5 @@
 import * as Dialog from "../../components/ui/Dialog";
 import { ScreenScrollView as ScrollView } from "../../components/ui/ScreenScrollView";
-import { useAuth } from "@clerk/expo";
 import { CameraView, useCameraPermissions } from "expo-camera";
 import * as Haptics from "expo-haptics";
 import {
@@ -28,9 +27,6 @@ import {
   useRemoteConnections,
 } from "../../state/use-remote-environment-registry";
 import { SymbolView } from "../../components/ui/AppSymbol";
-import { hasCloudPublicConfig } from "../cloud/publicConfig";
-import { CloudEnvironmentRows } from "./CloudEnvironmentRows";
-import { splitEnvironmentSections } from "./environmentSections";
 
 type ConnectionsNewRouteParams = {
   readonly mode?: string;
@@ -262,8 +258,6 @@ export function ConnectionsNewRouteScreen({
                 "For machines on your local network or tailnet. The machine keeps its own provider credentials."}
             </Text>
           </View>
-
-          {hasCloudPublicConfig() ? <T3ConnectSection /> : null}
         </View>
       </ScrollView>
     </SettingsScreen>
@@ -359,54 +353,6 @@ function PairingScanCard(props: {
         </Text>
       </View>
     </Pressable>
-  );
-}
-
-function T3ConnectSection() {
-  const { isLoaded, isSignedIn } = useAuth({ treatPendingAsSignedOut: false });
-  const navigation = useNavigation();
-  const { connectedEnvironments, onSetEnvironmentEnabled, onRemoveEnvironmentPress } =
-    useRemoteConnections();
-  const { connectedCloudEnvironments } = splitEnvironmentSections({
-    connectedEnvironments,
-    cloudEnvironments: null,
-  });
-
-  return (
-    <View collapsable={false} className="gap-2">
-      <Text className="px-4 text-sm font-t3-medium text-foreground-muted">
-        Or use the managed relay
-      </Text>
-      {isSignedIn ? (
-        <CloudEnvironmentRows
-          connectedCloudEnvironments={connectedCloudEnvironments}
-          onSetEnvironmentEnabled={onSetEnvironmentEnabled}
-          onRemoveEnvironment={onRemoveEnvironmentPress}
-          showHeader={false}
-        />
-      ) : (
-        <Pressable
-          accessibilityRole="button"
-          disabled={!isLoaded}
-          onPress={() => navigation.navigate("SettingsSheet", { screen: "SettingsAuth" })}
-          className="min-h-13 flex-row items-center gap-3 rounded-[26px] border-continuous bg-grouped-card px-4 active:opacity-70"
-        >
-          <View className="min-w-0 flex-1 py-3">
-            <Text className="text-base text-foreground">Sign in to T3 Connect</Text>
-            <Text className="text-sm text-foreground-muted">
-              Reach your machines from anywhere, no network setup.
-            </Text>
-          </View>
-          <SymbolView
-            name="chevron.right"
-            size={14}
-            tintColorClassName="accent-chevron"
-            type="monochrome"
-            weight="semibold"
-          />
-        </Pressable>
-      )}
-    </View>
   );
 }
 
