@@ -65,6 +65,7 @@ run_fork_checks() {
     say "No fork-touched test files to run"
     return
   fi
+  mapfile -t tests < <(printf '%s\n' "${tests[@]}" | sort -u)
   say "Running ${#tests[@]} test file(s) next to fork changes"
   vp test run "${tests[@]}"
 }
