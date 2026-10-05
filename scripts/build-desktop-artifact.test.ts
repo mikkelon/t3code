@@ -42,6 +42,11 @@ import {
   resolveMergedStageDependencies,
   resolveBuildOptions,
   stageWslRuntimeArchive,
+  bundlesServiceRuntime,
+  SERVICE_RUNTIME_EXTRA_RESOURCES,
+  ServiceRuntimeArchiveInvalidError,
+  serviceRuntimeArchiveStem,
+  stageServiceRuntimeArchive,
   ancestorNodeModulesPaths,
   copyDirectoryPreservingSymlinks,
   LinuxBrowserSecretHostError,
@@ -540,6 +545,41 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
         );
       }
     }),
+  );
+
+  it.effect("embeds the background service runtime outside app.asar only when bundled", () =>
+    Effect.gen(function* () {
+      assert.include(DESKTOP_FILE_EXCLUSIONS, `!${SERVICE_RUNTIME_EXTRA_RESOURCES[0].from}`);
+      const linux = yield* createBuildConfig(
+        "linux",
+        "AppImage",
+        "1.2.3",
+        false,
+        false,
+        undefined,
+        undefined,
+      );
+      const linuxWithServiceRuntime = yield* createBuildConfig(
+        "linux",
+        "AppImage",
+        "1.2.3",
+        false,
+        false,
+        undefined,
+        undefined,
+        false,
+        "arm64",
+        true,
+      );
+      assert.notDeepInclude(
+        linux.extraResources as ReadonlyArray<unknown>,
+        SERVICE_RUNTIME_EXTRA_RESOURCES[0],
+      );
+      assert.deepInclude(linuxWithServiceRuntime.extraResources as ReadonlyArray<unknown>, {
+        from: "apps/desktop/prod-resources/service-runtime.tar.gz",
+        to: "service-runtime.tar.gz",
+      });
+    }).pipe(Effect.provide(ConfigProvider.layer(ConfigProvider.fromEnv({ env: {} })))),
   );
 
   it("stages only the externals of both bundles in merged packages", () => {
@@ -1519,6 +1559,74 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
     ),
   );
 
+  it("ships its own platform's CLI release archive as the background service runtime", () => {
+    const runtimeArchivePath = "/tmp/t3-1.2.3-linux-arm64.tar.gz";
+    assert.isTrue(bundlesServiceRuntime({ platform: "linux", runtimeArchivePath }));
+    assert.isTrue(bundlesServiceRuntime({ platform: "mac", runtimeArchivePath }));
+    assert.isFalse(bundlesServiceRuntime({ platform: "linux", runtimeArchivePath: undefined }));
+    // Windows has no background service; its archive is the WSL runtime.
+    assert.isFalse(bundlesServiceRuntime({ platform: "win", runtimeArchivePath }));
+    assert.equal(serviceRuntimeArchiveStem("1.2.3", "linux", "arm64"), "t3-1.2.3-linux-arm64");
+    assert.equal(serviceRuntimeArchiveStem("1.2.3", "mac", "arm64"), "t3-1.2.3-darwin-arm64");
+  });
+
+  it.effect("stages the background service runtime only for this version and architecture", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem;
+        const path = yield* Path.Path;
+        const root = yield* fs.makeTempDirectoryScoped({ prefix: "t3-service-runtime-stage-" });
+        const sourceArchivePath = yield* makeLinuxCliArchiveFixture({
+          root,
+          stem: "t3-1.2.3-linux-arm64",
+        });
+        const archivePath = path.join(root, "app", SERVICE_RUNTIME_EXTRA_RESOURCES[0].from);
+
+        const wrongArch = yield* stageServiceRuntimeArchive({
+          sourceArchivePath,
+          archivePath,
+          stem: serviceRuntimeArchiveStem("1.2.3", "linux", "x64"),
+        }).pipe(Effect.flip);
+        assert.instanceOf(wrongArch, ServiceRuntimeArchiveInvalidError);
+        assert.include(wrongArch.message, "t3-1.2.3-linux-x64, found t3-1.2.3-linux-arm64");
+        assert.isFalse(yield* fs.exists(archivePath));
+
+        yield* stageServiceRuntimeArchive({
+          sourceArchivePath,
+          archivePath,
+          stem: serviceRuntimeArchiveStem("1.2.3", "linux", "arm64"),
+        });
+        assert.deepStrictEqual(
+          yield* fs.readFile(archivePath),
+          yield* fs.readFile(sourceArchivePath),
+        );
+      }),
+    ),
+  );
+
+  it.effect("refuses a background service runtime without its executable", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem;
+        const path = yield* Path.Path;
+        const root = yield* fs.makeTempDirectoryScoped({ prefix: "t3-service-runtime-no-t3-" });
+        const stem = "t3-1.2.3-linux-x64";
+        const sourceArchivePath = yield* makeLinuxCliArchiveFixture({
+          root,
+          stem,
+          omitMembers: [`${stem}/t3`],
+        });
+        const error = yield* stageServiceRuntimeArchive({
+          sourceArchivePath,
+          archivePath: path.join(root, "staged.tar.gz"),
+          stem,
+        }).pipe(Effect.flip);
+        assert.instanceOf(error, ServiceRuntimeArchiveInvalidError);
+        assert.include(error.message, `${stem}/t3 is missing`);
+      }),
+    ),
+  );
+
   it("parses Windows bsdtar member listings with CRLF line endings", () => {
     assert.deepStrictEqual(
       parseWslRuntimeArchiveMembers("./t3-1.2.3-linux-x64/t3\r\nt3-1.2.3-linux-x64/client/\r\n"),
@@ -1570,6 +1678,7 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
             mockUpdates: Option.none(),
             mockUpdateServerPort: Option.none(),
             wslRuntime: Option.none(),
+            serviceRuntime: Option.none(),
           }),
         );
 
@@ -1594,6 +1703,7 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
         mockUpdates: Option.some(false),
         mockUpdateServerPort: Option.none(),
         wslRuntime: Option.none(),
+        serviceRuntime: Option.none(),
       }).pipe(
         Effect.provide(
           ConfigProvider.layer(

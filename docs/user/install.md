@@ -31,6 +31,9 @@ line to add. Set `T3CODE_VERSION` to pin an exact version, such as
 | Reclaim database space                           | `t3 doctor` ([details](./background-service.md#reclaim-database-space)) |
 | Remove it again                                  | `t3 uninstall`                                                          |
 
+The desktop app installs the background service by itself, so a machine with
+the desktop app needs none of these commands.
+
 Run `t3 help` or `t3 --help` for the full reference. To start in a new working
 directory, use an explicit path such as `t3 ./my-project`. A bare directory name
 is accepted only if it already exists.
@@ -68,6 +71,11 @@ Both Linux builds update themselves from this fork's releases. The `.deb` asks
 for your password to install each update. If your desktop has no password
 prompt, the update fails. Download the new `.deb` and install it the same way.
 
+On its first launch, the app installs T3 Code's
+[background service](./background-service.md#the-desktop-app-and-the-service)
+and runs your agents there, so they keep working when you close the window.
+Updating the app updates the service.
+
 ### The `t3` command
 
 The desktop app includes the `t3` command-line tool. To run it from any
@@ -75,7 +83,10 @@ terminal, open **Settings → About** and choose **Install** next to
 **t3 command**. On macOS and Linux it adds a `t3` link to a folder on your
 `PATH`; on Windows it adds the app's command folder to your `PATH`. Open a new
 terminal afterwards. **Remove** takes it off again. If you already have `t3`
-from npm, it stays as it is.
+from npm, it stays as it is. When the
+[background service](./background-service.md) already put `t3` in
+`~/.local/bin`, the setting does not appear: that `t3` is already on your
+`PATH`.
 
 ### Windows Subsystem for Linux
 

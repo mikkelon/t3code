@@ -140,6 +140,18 @@ describe("DesktopSettings", () => {
         }),
       ),
   );
+  it.effect("persists the background service opt-out across launches", () =>
+    withSettings(
+      Effect.gen(function* () {
+        const settings = yield* DesktopAppSettings.DesktopAppSettings;
+        assert.isFalse((yield* settings.load).backgroundServiceDisabled);
+        assert.isTrue((yield* settings.setBackgroundServiceDisabled(true)).changed);
+        assert.isTrue((yield* settings.load).backgroundServiceDisabled);
+        yield* settings.setBackgroundServiceDisabled(false);
+        assert.isFalse((yield* settings.load).backgroundServiceDisabled);
+      }),
+    ),
+  );
 
   it.effect("falls back to defaults when the settings file is malformed", () =>
     withSettings(
@@ -176,6 +188,7 @@ describe("DesktopSettings", () => {
         assert.deepEqual(yield* settings.load, {
           linuxPasswordStore: "auto",
           localEnvironmentEnabled: true,
+          backgroundServiceDisabled: false,
           mainWindowBounds: { x: 120, y: 80, width: 1280, height: 900 },
           mainWindowMaximized: false,
           serverExposureMode: "network-accessible",
@@ -271,6 +284,7 @@ describe("DesktopSettings", () => {
         assert.deepEqual(yield* settings.load, {
           linuxPasswordStore: "auto",
           localEnvironmentEnabled: true,
+          backgroundServiceDisabled: false,
           mainWindowBounds: null,
           mainWindowMaximized: false,
           serverExposureMode: "local-only",
@@ -300,6 +314,7 @@ describe("DesktopSettings", () => {
         assert.deepEqual(yield* settings.load, {
           linuxPasswordStore: "auto",
           localEnvironmentEnabled: true,
+          backgroundServiceDisabled: false,
           mainWindowBounds: null,
           mainWindowMaximized: false,
           serverExposureMode: "local-only",
