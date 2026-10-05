@@ -1,4 +1,5 @@
-const CLI_RELEASE_REPOSITORY = "pingdotgg/t3code";
+// Every installer, updater, and release link reads this fork's GitHub Releases.
+export const CLI_RELEASE_REPOSITORY = "mikkelon/t3code";
 export const CLI_RELEASE_CHECKSUMS_FILE = "SHA256SUMS";
 export const CLI_RELEASE_BASE_URL_ENV = "T3CODE_RELEASE_BASE_URL";
 
@@ -52,6 +53,11 @@ export function cliReleaseDownloadBaseUrl(
   baseUrl: string | undefined = CLI_RELEASE_DEFAULT_BASE_URL,
 ): string {
   return `${(baseUrl?.trim() || CLI_RELEASE_DEFAULT_BASE_URL).replace(/\/+$/, "")}/v${version}`;
+}
+
+/** GitHub API record of the release tagged `v<version>`; it 404s until that release is published. */
+export function cliReleaseApiUrl(version: string): string {
+  return `https://api.github.com/repos/${CLI_RELEASE_REPOSITORY}/releases/tags/v${encodeURIComponent(version)}`;
 }
 
 export function parseChecksums(text: string): ReadonlyMap<string, string> {

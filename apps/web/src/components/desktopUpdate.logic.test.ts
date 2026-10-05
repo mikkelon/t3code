@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vite-plus/test";
 import type { DesktopUpdateActionResult, DesktopUpdateState } from "@t3tools/contracts";
+import { CLI_RELEASE_REPOSITORY } from "@t3tools/shared/cliRelease";
 
 import {
   canCheckForUpdate,
@@ -14,6 +15,8 @@ import {
   shouldShowArm64IntelBuildWarning,
   shouldToastDesktopUpdateActionResult,
 } from "./desktopUpdate.logic";
+
+const RELEASES_URL = `https://github.com/${CLI_RELEASE_REPOSITORY}/releases`;
 
 const baseState: DesktopUpdateState = {
   enabled: true,
@@ -221,13 +224,9 @@ describe("desktop update UI helpers", () => {
     "owner/repo#notes",
     "owner?tab=notes/repo",
     "owner/repo?tab=notes",
-  ])("falls back to upstream for an invalid configured repository: %s", (repository) => {
-    expect(getDesktopUpdateReleaseHistoryUrl(repository)).toBe(
-      "https://github.com/pingdotgg/t3code/releases",
-    );
-    expect(getDesktopUpdateReleaseUrl("1.2.3", repository)).toBe(
-      "https://github.com/pingdotgg/t3code/releases/tag/v1.2.3",
-    );
+  ])("falls back to the fork for an invalid configured repository: %s", (repository) => {
+    expect(getDesktopUpdateReleaseHistoryUrl(repository)).toBe(RELEASES_URL);
+    expect(getDesktopUpdateReleaseUrl("1.2.3", repository)).toBe(`${RELEASES_URL}/tag/v1.2.3`);
   });
 
   it("builds the nightly release URL without dropping its version suffix", () => {
