@@ -1,4 +1,5 @@
 import { AuthOrchestrationOperateScope } from "@t3tools/contracts";
+import { CLI_RELEASE_REPOSITORY } from "@t3tools/shared/cliRelease";
 import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 
 import { canMaintainEnvironment, findEnvironmentUpdate } from "./environment-maintenance";
@@ -58,7 +59,7 @@ describe("environment release checks", () => {
   const signal = new AbortController().signal;
   const feed = (...tags: ReadonlyArray<string>) =>
     new Response(
-      `<feed><id>tag:github.com,2008:https://github.com/pingdotgg/t3code/releases</id>${tags
+      `<feed><id>tag:github.com,2008:https://github.com/${CLI_RELEASE_REPOSITORY}/releases</id>${tags
         .map((tag) => `<entry><id>tag:github.com,2008:Repository/1/${tag}</id></entry>`)
         .join("")}</feed>`,
     );
@@ -67,7 +68,7 @@ describe("environment release checks", () => {
     vi.stubGlobal(
       "fetch",
       vi.fn(async (url: string) =>
-        url === "https://github.com/pingdotgg/t3code/releases.atom"
+        url === `https://github.com/${CLI_RELEASE_REPOSITORY}/releases.atom`
           ? feed(
               "desktop-preview",
               "v1.0.0-preview.20260924.3",
@@ -93,11 +94,18 @@ describe("environment release checks", () => {
     vi.stubGlobal(
       "fetch",
       vi.fn(async (url: string) => {
-        if (url === "https://github.com/pingdotgg/t3code/releases.atom") return feed(...nightlies);
-        if (url === "https://api.github.com/repos/pingdotgg/t3code/releases?per_page=100&page=1") {
+        if (url === `https://github.com/${CLI_RELEASE_REPOSITORY}/releases.atom`)
+          return feed(...nightlies);
+        if (
+          url ===
+          `https://api.github.com/repos/${CLI_RELEASE_REPOSITORY}/releases?per_page=100&page=1`
+        ) {
           return Response.json(Array.from({ length: 100 }, () => ({ tag_name: "v2.0.0" })));
         }
-        if (url === "https://api.github.com/repos/pingdotgg/t3code/releases?per_page=100&page=2") {
+        if (
+          url ===
+          `https://api.github.com/repos/${CLI_RELEASE_REPOSITORY}/releases?per_page=100&page=2`
+        ) {
           return Response.json([
             { tag_name: "v1.0.0-preview.20260925.1", draft: true },
             { tag_name: "v1.0.0-preview.20260924.3" },
