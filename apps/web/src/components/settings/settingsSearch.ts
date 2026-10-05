@@ -564,12 +564,6 @@ export const SETTINGS_SEARCH_ITEMS = [
     desktopOnly: true,
   },
   {
-    id: "privacy-policy",
-    title: "Privacy policy",
-    to: "/settings/general",
-    searchTerms: ["telemetry analytics usage data tracking legal opt out"],
-  },
-  {
     id: "telemetry-export",
     title: "OpenTelemetry export",
     to: "/settings/diagnostics",
