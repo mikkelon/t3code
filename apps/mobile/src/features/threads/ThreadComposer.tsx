@@ -51,7 +51,6 @@ import Animated, {
 } from "react-native-reanimated";
 import { useUniwindTheme } from "../../lib/useUniwindTheme";
 import { themeColorWithAlpha } from "../../lib/mobileTheme";
-import { armAgentAwarenessLiveActivityForLocalWork } from "../agent-awareness/remoteRegistration";
 import { scopedThreadKey } from "../../lib/scopedEntities";
 import {
   getComposerDraftSnapshot,
@@ -147,7 +146,6 @@ export interface ThreadComposerProps {
   readonly contentMaxWidth?: number;
   readonly bottomInset?: number;
   readonly connectionState: RemoteClientConnectionState;
-  readonly environmentLabel: string | null;
   /**
    * Message sync phase for the selected thread (drives the status pill):
    * "loading" = first fetch, nothing to show yet; "syncing" = cached messages
@@ -611,19 +609,7 @@ export const ThreadComposer = memo(function ThreadComposer(props: ThreadComposer
       if (inFlightThreadIdsRef.current.has(threadKey)) return;
       inFlightThreadIdsRef.current.add(threadKey);
       try {
-        const messageId = await onSendMessage(followUp);
-        if (messageId === null) {
-          return;
-        }
-        // Sending a prompt starts agent work: arm the lock-screen card while the
-        // app is foregrounded and the activity token can be registered. Armed
-        // after the send so its preference read and native Activity start don't
-        // contend with the queued-message feedback on the tap frame.
-        armAgentAwarenessLiveActivityForLocalWork({
-          environmentId: props.environmentId,
-          threadTitle: props.selectedThread.title,
-          projectTitle: props.environmentLabel ?? "T3 Code",
-        });
+        await onSendMessage(followUp);
       } finally {
         inFlightThreadIdsRef.current.delete(threadKey);
       }
@@ -636,9 +622,7 @@ export const ThreadComposer = memo(function ThreadComposer(props: ThreadComposer
       usageLimitsOffered,
       onSendMessage,
       props.environmentId,
-      props.environmentLabel,
       props.selectedThread.id,
-      props.selectedThread.title,
       voiceInput.blocksSubmission,
     ],
   );

@@ -101,14 +101,11 @@ export function presentEnvironmentConnection(
  */
 export function environmentMcpUrl(input: {
   readonly entry: ConnectionCatalogEntry;
-  readonly relayHttpBaseUrl?: string | undefined;
 }): string | null {
   const httpBaseUrl =
-    input.entry.target._tag === "RelayConnectionTarget"
-      ? (input.relayHttpBaseUrl ?? null)
-      : input.entry.target._tag === "SshConnectionTarget"
-        ? null
-        : connectionCatalogDisplayUrl(input.entry);
+    input.entry.target._tag === "SshConnectionTarget"
+      ? null
+      : connectionCatalogDisplayUrl(input.entry);
   if (httpBaseUrl === null) return null;
   let url: URL;
   try {
@@ -129,8 +126,6 @@ export function connectionCatalogDisplayUrl(entry: ConnectionCatalogEntry): stri
   switch (entry.target._tag) {
     case "PrimaryConnectionTarget":
       return entry.target.httpBaseUrl;
-    case "RelayConnectionTarget":
-      return null;
     case "BearerConnectionTarget":
       return Option.isSome(entry.profile) && entry.profile.value._tag === "BearerConnectionProfile"
         ? entry.profile.value.httpBaseUrl
