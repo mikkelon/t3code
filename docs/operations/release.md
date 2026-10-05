@@ -2,6 +2,10 @@
 
 > For maintainers. Using T3 Code? See [docs/user](../user/).
 
+> **This fork:** the rest of this page describes upstream's pipeline. `release.yml` no longer
+> triggers here and the preview workflows are removed. Fork releases are built by
+> `.github/workflows/fork-release.yml`; see [Maintaining the fork](../../README.md#maintaining-the-fork).
+
 This document covers the unified release workflow for stable and nightly desktop releases.
 
 ## What the workflow does
