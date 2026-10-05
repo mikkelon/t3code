@@ -6,8 +6,8 @@ Antigravity and others) by T3 Tools Inc., released under the [MIT license](./LIC
 All credit for T3 Code goes to its authors; this fork only changes two things:
 
 - **A multi-device workflow.** Every machine runs T3 Code as an always-on
-  background service, and the desktop app on that machine uses the running service
-  instead of starting a second backend. The machines and a phone connect to each
+  background service. The desktop app installs it, keeps it on the app's version,
+  and uses it instead of starting a second backend. The machines and a phone connect to each
   other over the LAN, Tailscale or SSH, and an SSH device host (for example a
   Mac) provides remote iOS simulators and Android emulators.
 - **No commercial T3 features.** No T3 Connect cloud relay or managed tunnels, no
@@ -29,6 +29,8 @@ See [Providers](./docs/user/install.md#providers) for the full list.
 
 ### Command line and background service (Linux, Apple Silicon Mac)
 
+For machines without the desktop app, such as a headless server:
+
 ```bash
 curl -fsSL https://raw.githubusercontent.com/mikkelon/t3code/main/scripts/install.sh | sh
 t3 service install
@@ -49,9 +51,11 @@ AppImage:
 chmod +x T3-Code-*.AppImage && ./T3-Code-*.AppImage
 ```
 
-Both update themselves from this fork's releases. When a background service is
-running on the machine, the desktop app uses it instead of starting its own
-server.
+Both update themselves from this fork's releases. On first launch the app installs
+the background service from the version it ships, and each app update moves the
+service to the new version once no agents are running. A service you installed with
+`t3 service install` is used as it is. To run agents inside the app instead, turn on
+**Don't run agents in the background** under **Settings → Connections → Advanced**.
 
 The fork publishes no macOS or Windows desktop builds and no Windows CLI. Build
 them from source if you need them (see below).
@@ -65,11 +69,12 @@ service name and app ID.
 
 ## Update
 
-| What                         | How                                                                           |
-| ---------------------------- | ----------------------------------------------------------------------------- |
-| CLI and background service   | `t3 update` on the machine (asks before restarting the service)               |
-| A server from another client | **Update server** in the version notice, or `t3 update <version>` on its host |
-| Linux desktop app            | Updates itself; or download the new release                                   |
+| What                                     | How                                                                           |
+| ---------------------------------------- | ----------------------------------------------------------------------------- |
+| Background service, with the desktop app | Updates with the app                                                          |
+| CLI and background service, headless     | `t3 update` on the machine (asks before restarting the service)               |
+| A server from another client             | **Update server** in the version notice, or `t3 update <version>` on its host |
+| Linux desktop app                        | Updates itself; or download the new release                                   |
 
 Fork releases are only published on the stable channel; there are no nightly
 builds. See [Updating T3 Code](./docs/user/updating.md).
@@ -77,6 +82,7 @@ builds. See [Updating T3 Code](./docs/user/updating.md).
 ## Multi-device setup
 
 1. **Every machine** (for example an always-on office PC, a home PC and a laptop):
+   install the desktop app, which installs the service, or on a headless machine
    install the CLI and run `t3 service install`.
 2. **Every machine**, with Tailscale running: `t3 pair --tailscale`. This publishes
    the service over Tailscale Serve HTTPS (it stays published across restarts) and

@@ -19,6 +19,38 @@ interface CapturedLog {
 }
 
 describe("serverRuntimeState", () => {
+  it.effect("releases runtime state on shutdown only while it names this process", () =>
+    Effect.gen(function* () {
+      const fileSystem = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const root = yield* fileSystem.makeTempDirectoryScoped({
+        prefix: "t3-server-runtime-state-test-",
+      });
+      const statePath = path.join(root, "server-runtime.json");
+      const stateFor = (pid: number): ServerRuntimeState.PersistedServerRuntimeState => ({
+        version: 1,
+        pid,
+        port: 3_773,
+        origin: "http://127.0.0.1:3773",
+        startedAt: "2026-10-05T00:00:00.000Z",
+      });
+
+      yield* ServerRuntimeState.persistServerRuntimeState({
+        path: statePath,
+        state: stateFor(process.pid + 1),
+      });
+      yield* ServerRuntimeState.releasePersistedServerRuntimeState(statePath);
+      assert.isTrue(yield* fileSystem.exists(statePath));
+
+      yield* ServerRuntimeState.persistServerRuntimeState({
+        path: statePath,
+        state: stateFor(process.pid),
+      });
+      yield* ServerRuntimeState.releasePersistedServerRuntimeState(statePath);
+      assert.isFalse(yield* fileSystem.exists(statePath));
+    }).pipe(Effect.provide(NodeServices.layer)),
+  );
+
   it.effect("persists and reads the runtime state", () =>
     Effect.gen(function* () {
       const fileSystem = yield* FileSystem.FileSystem;

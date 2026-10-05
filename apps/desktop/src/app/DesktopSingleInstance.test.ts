@@ -42,6 +42,7 @@ const layerDesktopSingleInstance = (
     openExternal: () => Effect.succeed(true),
     openSystemSettings: () => Effect.succeed(false),
     copyText: () => Effect.void,
+    openPath: () => Effect.void,
   },
 ) => {
   const environment = DesktopEnvironment.DesktopEnvironment.of({
@@ -305,6 +306,7 @@ it.effect.each(["startup", "open-url"] as const)(
           }),
         openSystemSettings: () => Effect.succeed(false),
         copyText: () => Effect.void,
+        openPath: () => Effect.void,
       });
       const listeners = new Map<string, (...args: unknown[]) => void>();
       const electronApp = {

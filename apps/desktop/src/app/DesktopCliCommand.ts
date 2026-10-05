@@ -162,12 +162,27 @@ export const make = Effect.gen(function* () {
     return Option.none<string>();
   });
 
+  /**
+   * The background service's launcher (DesktopBackgroundService.linkLauncher):
+   * `~/.local/bin/t3` linked into the T3 home's `runtime/versions`. It already
+   * puts `t3` on PATH, so the setting offers nothing next to it.
+   */
+  const serviceLauncherOnPath = Effect.gen(function* () {
+    const directory = path.join(environment.homeDirectory, ".local", "bin");
+    const target = path.resolve(directory, yield* fs.readLink(path.join(directory, "t3")));
+    const relative = path.relative(path.join(environment.baseDir, "runtime", "versions"), target);
+    return relative.length > 0 && !relative.startsWith("..") && !path.isAbsolute(relative);
+  }).pipe(Effect.orElseSucceed(() => false));
+
   const state: DesktopCliCommand["Service"]["state"] = Effect.gen(function* () {
     if (!environment.isPackaged) {
       return { supported: false, installedPath: null, onPath: false } as const;
     }
     const installed = yield* installedAt;
-    if (Option.isNone(installed)) return { supported: true, installedPath: null, onPath: false };
+    if (Option.isNone(installed)) {
+      const supported = !(yield* serviceLauncherOnPath);
+      return { supported, installedPath: null, onPath: false };
+    }
     // On Windows only terminals opened after the change see it. On Unix the
     // first `t3` on PATH must be ours; a `t3` earlier on PATH would shadow it.
     const first = yield* firstOnPath;

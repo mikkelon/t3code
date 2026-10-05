@@ -89,9 +89,39 @@ describes the server. Process replacement belongs to the launcher's
 [update protocol](./server-updates.md); the connection runtime handles the
 resulting disconnect.
 
+### Desktop and the background service
+
+One T3 home has one server. Two servers on one database contend for SQLite, replay each other's
+events into their own provider reactors (duplicate agent processes for one thread), and fight over
+runtime state and tunnels. So before choosing a port, the desktop app decides who owns its home
+([discovery](../../apps/desktop/src/backend/DesktopLocalServerDiscovery.ts)): a server whose
+`server-runtime.json` names a live pid and whose origin answers with the home's `environment-id` is
+adopted; an installed service unit for that home is started and adopted; with neither, a packaged
+Linux or macOS app installs the service unless the user opted out; only otherwise does the app embed
+a backend. This all happens before any backend starts, which is what makes installing safe. Failure
+to start an installed service or sign in never falls back to embedding; a failed install may, but
+only after removing what it installed. The runtime file alone is not trusted because a dead
+server's file can point at a port another home's server now uses.
+
+The service never runs from the app bundle: an AppImage is mounted only while it runs and an update
+replaces it, and the unit needs the standalone `t3` the launcher protocol expects. So release builds
+ship their own platform's CLI release archive (`resources/service-runtime.tar.gz`), and
+`t3 service install|stage --runtime-archive` unpacks it into `<home>/runtime/versions/<version>`,
+the layout `t3 update` and the install script produce. An older service is moved to the app's
+version through the server's own update (`server.updateServer`), not by rewriting the unit: the
+launcher backs up the database, trials the new version and rolls back when it fails to start. The
+renderer starts that update, because it already knows when no agent runs and tracks update
+progress and failure. The app
+authenticates the way `t3` does for the same OS user: a CLI of the server's exact version (bundled,
+or the service's pinned runtime) issues an administrative session, because every CLI that opens the
+database runs migrations. An adopted server is never stopped or cleaned up by the app, and a server
+only clears runtime state that still names its own pid. Settings that relaunch the embedded backend
+do not reach an adopted server; Tailscale HTTPS is therefore a server setting
+(`server.setTailscaleServe`), while launch flags keep owning it for the embedded backend.
+
 ### Desktop without a local environment
 
-Desktop normally launches its own primary server, but the desktop setting `localEnvironmentEnabled`
+Desktop normally launches or adopts its primary server, but the desktop setting `localEnvironmentEnabled`
 (`apps/desktop/src/settings/DesktopAppSettings.ts`) turns that off. Changing it relaunches the app;
 no local state is deleted. On the next start the main process skips port selection, server exposure,
 and the primary and WSL backends, and opens the window right away. The renderer sees this through
