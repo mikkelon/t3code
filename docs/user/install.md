@@ -102,7 +102,9 @@ command cannot reach the app, start or update the desktop app and try again.
 Install T3 Code from the
 [App Store](https://apps.apple.com/us/app/t3-code-remote-claude-more/id6787819824) or
 [Google Play](https://play.google.com/store/apps/details?id=com.t3tools.t3code).
-The store app is upstream's and pairs directly with servers running this fork.
+The store app is upstream's. It pairs directly with servers running this fork
+when both speak the same orchestration protocol; otherwise it shows **Client not
+supported** until the store app is updated.
 The phone connects to a server on another machine. Follow
 [remote access](./remote-access.md) to link it through T3 Connect or a pairing URL.
 
