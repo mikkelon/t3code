@@ -1,7 +1,7 @@
 import Constants from "expo-constants";
 import * as RelayTracing from "@t3tools/shared/relayTracing";
 
-import { hasTracingPublicConfig, resolveCloudPublicConfig } from "../cloud/publicConfig";
+import { hasTracingPublicConfig, resolveObservabilityPublicConfig } from "./publicConfig";
 
 export interface TracingConfig {
   readonly tracesUrl: string;
@@ -15,11 +15,11 @@ export interface TracingResource {
 }
 
 export function resolveTracingConfig(): TracingConfig | null {
-  const config = resolveCloudPublicConfig();
+  const config = resolveObservabilityPublicConfig();
   if (!hasTracingPublicConfig(config)) {
     return null;
   }
-  const { tracesUrl, tracesDataset, tracesToken } = config.observability;
+  const { tracesUrl, tracesDataset, tracesToken } = config;
   return { tracesUrl, tracesDataset, tracesToken };
 }
 

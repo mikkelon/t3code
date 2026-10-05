@@ -90,15 +90,6 @@ counts keep the full status path. Cached fetch failures share the existing backo
 the actual failed attempt. Unchanged desktop environment bootstrap reads retain their array
 identity so polling does not invalidate subscribers.
 
-Relay awareness queues one pending publication per thread and retains a follow-up when the thread
-changes during a send. Transcript deltas and tool output do not enqueue awareness work. Run,
-request, and relevant thread metadata events do. Configuration is checked before shell reads, and
-connection changes invalidate published identities so relinking can publish unchanged state.
-Failed publications retry the latest state up to five times with exponential delays. A new
-relevant event resets the budget; successful publication, disabling, or unlinking cancels retries.
-After the budget is exhausted, publication waits for another relevant event instead of generating
-continuous traffic during an outage.
-
 Focused coverage: `ProjectionSettlement.test.ts`, `ThreadSettlementService.test.ts`,
-`runtimeLayer.test.ts`, `AgentAwarenessRelay.test.ts`, `GitVcsDriverCore.test.ts`,
+`runtimeLayer.test.ts`, `GitVcsDriverCore.test.ts`,
 `ThreadStatusIndicators.subscriptions.test.tsx`, and `desktopLocal.test.ts`.
