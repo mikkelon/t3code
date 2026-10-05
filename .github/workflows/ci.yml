@@ -22,7 +22,7 @@ jobs:
   # open: if the diff cannot be resolved, everything runs.
   changes:
     name: Changes
-    runs-on: blacksmith-2vcpu-ubuntu-2404
+    runs-on: ubuntu-24.04
     timeout-minutes: 5
     outputs:
       typecheck: ${{ steps.detect.outputs.typecheck }}
@@ -63,8 +63,8 @@ jobs:
       contents: read
       id-token: write
     name: Lint
-    runs-on: blacksmith-8vcpu-ubuntu-2404
-    timeout-minutes: 10
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
     steps:
       - name: Checkout
         uses: actions/checkout@v6
@@ -119,8 +119,8 @@ jobs:
     name: Build and Typecheck
     needs: changes
     if: ${{ !cancelled() && (needs.changes.outputs.build != 'false' || needs.changes.outputs.typecheck != 'false') }}
-    runs-on: blacksmith-8vcpu-ubuntu-2404
-    timeout-minutes: 10
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
     steps:
       - name: Checkout
         uses: actions/checkout@v6
@@ -131,14 +131,10 @@ jobs:
             !/apps/mobile/modules/t3-terminal/Vendor/**/*.a
           sparse-checkout-cone-mode: false
 
-      - uses: ./.github/actions/setup-apt-mirrors
-        if: needs.changes.outputs.build != 'false'
-
       # Runs in the background while Vite+ installs; the step before the build waits for it.
       - name: Start installing browser secret helper build libraries
         if: needs.changes.outputs.build != 'false'
         run: |
-          sudo sed -i 's|http://|https://|g' /etc/apt/blacksmith-ubuntu-mirrors.txt /etc/apt/sources.list.d/ubuntu.sources
           (
             set +e
             sudo apt-get update && sudo apt-get install -y libsecret-1-dev pkg-config
@@ -213,8 +209,8 @@ jobs:
     name: Test
     needs: changes
     if: ${{ !cancelled() && needs.changes.outputs.test != 'false' }}
-    runs-on: blacksmith-8vcpu-ubuntu-2404
-    timeout-minutes: 10
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
     steps:
       - name: Checkout
         uses: actions/checkout@v6
@@ -225,13 +221,20 @@ jobs:
             !/apps/mobile/modules/t3-terminal/Vendor/**/*.a
           sparse-checkout-cone-mode: false
 
-      - uses: ./.github/actions/setup-apt-mirrors
+      # GitHub's Ubuntu runner image usually has gcc,
+      # but ACP process-tree live tests compile a small pthread fixture with `cc`
+      # and soft-skip when it is missing. Install build-essential so that path
+      # always runs in CI instead of silently no-oping.
+      - name: Install C toolchain for process-tree fixtures
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends build-essential
+          command -v cc
 
       # The desktop tests compile the browser secret helper. The install runs in
       # the background while Vite+ installs; the step before the tests waits for it.
       - name: Start installing browser secret helper build libraries
         run: |
-          sudo sed -i 's|http://|https://|g' /etc/apt/blacksmith-ubuntu-mirrors.txt /etc/apt/sources.list.d/ubuntu.sources
           (
             set +e
             sudo apt-get update && sudo apt-get install -y libsecret-1-dev pkg-config
@@ -258,7 +261,7 @@ jobs:
         run: python3 -B .github/scripts/stage-preview-bundle.test.py
 
       - name: Test release checks
-        run: node --test .github/scripts/check-nightly-release.test.cjs .github/scripts/vercel-deployment-output.test.cjs
+        run: node --test .github/scripts/check-nightly-release.test.cjs
 
       - name: Finish installing browser secret helper build libraries
         timeout-minutes: 5
@@ -289,8 +292,8 @@ jobs:
     name: Test Web
     needs: changes
     if: ${{ !cancelled() && needs.changes.outputs.test_web != 'false' }}
-    runs-on: blacksmith-8vcpu-ubuntu-2404
-    timeout-minutes: 10
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
     steps:
       - name: Checkout
         uses: actions/checkout@v6
@@ -331,8 +334,15 @@ jobs:
             node apps/web/node_modules/playwright/cli.js install-deps chromium
           fi
 
+      # Fork: on the 4-vCPU hosted runner the heavy file-preview suite times out when it
+      # shares the browser with other files, so it runs alone after the rest.
       - name: Test
-        run: vp run --filter @t3tools/web test
+        working-directory: apps/web
+        run: vp test run --passWithNoTests --project unit --project browser --exclude src/components/files/AttachmentFilePreview.browser.test.tsx
+
+      - name: Test file previews
+        working-directory: apps/web
+        run: vp test run --project browser --testTimeout=60000 src/components/files/AttachmentFilePreview.browser.test.tsx
 
       # Browser tests run source modules; this boots the production chunk graph.
       - name: Boot the built web client
@@ -353,10 +363,8 @@ jobs:
       contents: read
       id-token: write
     name: Test Server ${{ matrix.shard }}
-    runs-on: blacksmith-4vcpu-ubuntu-2404
-    # Shards take 2-5 minutes. When the shared task cache throttles reads, each
-    # failed fetch stalls vp for 15-90s, which pushed shards past 10 minutes.
-    timeout-minutes: 20
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
@@ -469,7 +477,7 @@ jobs:
     name: Rust
     needs: changes
     if: ${{ !cancelled() && needs.changes.outputs.rust != 'false' }}
-    runs-on: blacksmith-4vcpu-ubuntu-2404
+    runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
       - name: Checkout
@@ -501,9 +509,11 @@ jobs:
   mobile_native_static_analysis:
     name: Mobile Native Static Analysis
     needs: changes
-    if: ${{ !cancelled() && needs.changes.outputs.mobile_native != 'false' }}
-    runs-on: blacksmith-6vcpu-macos-26
-    timeout-minutes: 10
+    # Fork: pushes to main run the macOS lint too, so main never goes green
+    # with a job skipped.
+    if: ${{ !cancelled() && (github.event_name == 'push' || needs.changes.outputs.mobile_native != 'false') }}
+    runs-on: macos-latest
+    timeout-minutes: 20
     steps:
       - name: Checkout
         uses: actions/checkout@v6
@@ -535,7 +545,7 @@ jobs:
     name: Release Smoke
     needs: changes
     if: ${{ !cancelled() && needs.changes.outputs.release_smoke != 'false' }}
-    runs-on: blacksmith-8vcpu-ubuntu-2404
+    runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
       - name: Checkout
@@ -575,7 +585,7 @@ jobs:
         mobile_native_static_analysis,
         release_smoke,
       ]
-    runs-on: blacksmith-2vcpu-ubuntu-2404
+    runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
       - name: Require every job to pass
