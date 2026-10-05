@@ -100,19 +100,15 @@ import {
   saveConnection,
   savePreferencesPatch,
 } from "../persistence/imperative";
-import { toStableSavedRemoteConnection } from "./connection";
 
-const managedConnection = {
+const bearerConnection = {
   environmentId: EnvironmentId.make("environment-1"),
   environmentLabel: "Desktop",
   pairingUrl: "https://desktop.example/",
   displayUrl: "https://desktop.example/",
   httpBaseUrl: "https://desktop.example/",
   wsBaseUrl: "wss://desktop.example/",
-  bearerToken: null,
-  authenticationMethod: "dpop",
-  dpopAccessToken: "short-lived-token",
-  relayManaged: true,
+  bearerToken: "bearer-token",
 } as const;
 
 describe("mobile connection storage", () => {
@@ -121,22 +117,38 @@ describe("mobile connection storage", () => {
     vi.clearAllMocks();
   });
 
-  it("persists relay-managed connections without their ephemeral access token", async () => {
-    await saveConnection(managedConnection);
+  it("persists and loads bearer connections", async () => {
+    await saveConnection(bearerConnection);
 
     const savedValue = mocks.setItemAsync.mock.calls[0]?.[1];
     expect(savedValue).toBeDefined();
-    expect(JSON.parse(savedValue ?? "")).toEqual({
-      connections: [toStableSavedRemoteConnection(managedConnection)],
-    });
+    expect(JSON.parse(savedValue ?? "")).toEqual({ connections: [bearerConnection] });
+    await expect(loadSavedConnections()).resolves.toEqual([bearerConnection]);
   });
 
-  it("loads relay-managed connection metadata without a cached access token", async () => {
-    await saveConnection(managedConnection);
+  it("does not load legacy T3 Connect connections, which carry no bearer token", async () => {
+    await mocks.setItemAsync(
+      "t3code.connections",
+      JSON.stringify({
+        connections: [
+          bearerConnection,
+          {
+            ...bearerConnection,
+            environmentId: "environment-2",
+            pairingUrl: "https://relay.example/",
+            displayUrl: "https://relay.example/",
+            httpBaseUrl: "https://relay.example/",
+            wsBaseUrl: "wss://relay.example/",
+            bearerToken: null,
+            authenticationMethod: "dpop",
+            dpopAccessToken: "short-lived-token",
+            relayManaged: true,
+          },
+        ],
+      }),
+    );
 
-    await expect(loadSavedConnections()).resolves.toEqual([
-      toStableSavedRemoteConnection(managedConnection),
-    ]);
+    await expect(loadSavedConnections()).resolves.toEqual([bearerConnection]);
   });
 
   it("preserves secure-storage read failures with operation and key context", async () => {

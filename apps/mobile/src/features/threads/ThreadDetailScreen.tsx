@@ -1381,7 +1381,6 @@ export const ThreadDetailScreen = memo(function ThreadDetailScreen(props: Thread
                         placeholder="Ask the repo agent, or run a command…"
                         contentMaxWidth={contentMaxWidth}
                         connectionState={props.connectionStateLabel}
-                        environmentLabel={props.environmentLabel}
                         selectedThread={props.selectedThread}
                         hasCompactableConversation={
                           hasCompactableConversation && !props.isCompacting

@@ -23,13 +23,6 @@ export class BearerConnectionTarget extends Schema.TaggedClass<BearerConnectionT
   },
 ) {}
 
-export class RelayConnectionTarget extends Schema.TaggedClass<RelayConnectionTarget>()(
-  "RelayConnectionTarget",
-  {
-    ...ConnectionTargetBase,
-  },
-) {}
-
 export class SshConnectionTarget extends Schema.TaggedClass<SshConnectionTarget>()(
   "SshConnectionTarget",
   {
@@ -41,14 +34,12 @@ export class SshConnectionTarget extends Schema.TaggedClass<SshConnectionTarget>
 export const ConnectionTarget = Schema.Union([
   PrimaryConnectionTarget,
   BearerConnectionTarget,
-  RelayConnectionTarget,
   SshConnectionTarget,
 ]);
 export type ConnectionTarget = typeof ConnectionTarget.Type;
 
 export const PersistedConnectionTarget = Schema.Union([
   BearerConnectionTarget,
-  RelayConnectionTarget,
   SshConnectionTarget,
 ]);
 export type PersistedConnectionTarget = typeof PersistedConnectionTarget.Type;
@@ -62,7 +53,6 @@ export const ConnectionTransientReason = Schema.Literals([
   "timeout",
   "transport",
   "endpoint-unavailable",
-  "relay-unavailable",
   "remote-unavailable",
 ]);
 export type ConnectionTransientReason = typeof ConnectionTransientReason.Type;
@@ -105,18 +95,10 @@ export class ConnectionBlockedError extends Schema.TaggedError<ConnectionBlocked
 
 export type ConnectionAttemptError = ConnectionTransientError | ConnectionBlockedError;
 
-export const DPOP_ACCESS_TOKEN_REFRESH_SKEW_MS = 60_000;
-
-export type PreparedHttpAuthorization =
-  | {
-      readonly _tag: "Bearer";
-      readonly token: string;
-    }
-  | {
-      readonly _tag: "Dpop";
-      readonly accessToken: string;
-      readonly expiresAtEpochMs: number;
-    };
+export type PreparedHttpAuthorization = {
+  readonly _tag: "Bearer";
+  readonly token: string;
+};
 
 export interface PreparedConnection {
   readonly environmentId: EnvironmentId;
