@@ -178,3 +178,19 @@ export const readPersistedServerRuntimeState = (path: string) =>
         ),
     }),
   );
+
+/**
+ * Clear the runtime state on shutdown, but only while it still names this
+ * process. Another server on the same home may have written its own since;
+ * deleting that would hide a live server from `t3 pair` and the desktop app.
+ */
+export const releasePersistedServerRuntimeState = (path: string) =>
+  readPersistedServerRuntimeState(path).pipe(
+    Effect.flatMap((state) =>
+      Option.isSome(state) && state.value.pid !== process.pid
+        ? Effect.logWarning("Leaving runtime state written by another server").pipe(
+            Effect.annotateLogs({ statePath: path, pid: state.value.pid }),
+          )
+        : clearPersistedServerRuntimeState(path),
+    ),
+  );
