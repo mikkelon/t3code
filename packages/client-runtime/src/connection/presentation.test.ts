@@ -11,7 +11,7 @@ import {
   BearerConnectionTarget,
   ConnectionBlockedError,
   ConnectionTransientError,
-  RelayConnectionTarget,
+  SshConnectionTarget,
   type SupervisorConnectionState,
 } from "./model.ts";
 import {
@@ -111,28 +111,21 @@ describe("connection presentation", () => {
   });
 
   it("passes over routes without an address of their own", () => {
-    const relay = new RelayConnectionTarget({
+    const ssh = new SshConnectionTarget({
       environmentId: TARGET.environmentId,
       label: TARGET.label,
+      connectionId: "ssh-route",
     });
     const entry: ConnectionCatalogEntry = {
       ...ENTRY,
-      target: relay,
+      target: ssh,
       profile: Option.none(),
       alternateRoutes: [{ target: ENTRY.target, profile: ENTRY.profile }],
     };
 
-    // Relay discovery has not reported the tunnel address yet.
-    expect(environmentMcpUrl({ entry, connectedTarget: relay })).toBe(
+    expect(environmentMcpUrl({ entry, connectedTarget: ssh })).toBe(
       "https://environment.example.test/mcp",
     );
-    expect(
-      environmentMcpUrl({
-        entry,
-        connectedTarget: relay,
-        relayHttpBaseUrl: "https://tunnel.example.test",
-      }),
-    ).toBe("https://tunnel.example.test/mcp");
   });
 
   it("distinguishes initial connection, reconnect, and retry errors", () => {

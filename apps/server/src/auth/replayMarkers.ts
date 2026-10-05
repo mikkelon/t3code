@@ -7,12 +7,20 @@ import * as Option from "effect/Option";
 import * as Path from "effect/Path";
 import * as Schedule from "effect/Schedule";
 
-import { CLOUD_REPLAY_MARKER_PREFIXES } from "../cloud/CloudLink.ts";
 import * as ServerConfig from "../config.ts";
 import { forkParked } from "../serverActivation.ts";
 import { DPOP_REPLAY_MARKER_PREFIX } from "./dpop.ts";
 
-const REPLAY_MARKER_PREFIXES = [DPOP_REPLAY_MARKER_PREFIX, ...CLOUD_REPLAY_MARKER_PREFIXES];
+// Markers from T3 Connect's mint and health proofs. This build no longer writes
+// them, but a home used by an upstream build can still hold some to expire.
+const LEGACY_CLOUD_REPLAY_MARKER_PREFIXES = [
+  "cloud-mint-nonce-",
+  "cloud-mint-jti-",
+  "cloud-health-nonce-",
+  "cloud-health-jti-",
+];
+
+const REPLAY_MARKER_PREFIXES = [DPOP_REPLAY_MARKER_PREFIX, ...LEGACY_CLOUD_REPLAY_MARKER_PREFIXES];
 
 /**
  * How long a replay marker stays on disk. A marker only matters while its proof

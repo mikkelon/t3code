@@ -46,6 +46,7 @@ export function GitHubRoutingSettings() {
       <SettingsSection title="GitHub routing">
         {[...catalog.entries.values()].map((entry) => {
           const environmentId = entry.target.environmentId;
+          const displayUrl = connectionCatalogDisplayUrl(entry);
           const selected = gitHubRoutingPermissionFor(entry, permissions);
           const disabled = !catalog.isReady || saving || gitHubRoutingConnectionKey(entry) === null;
           return (
@@ -61,9 +62,11 @@ export function GitHubRoutingSettings() {
                   <Text className="text-base font-t3-bold text-foreground">
                     {entry.target.label}
                   </Text>
-                  <Text className="text-xs text-foreground-muted" numberOfLines={1}>
-                    {connectionCatalogDisplayUrl(entry) ?? "T3 Connect"}
-                  </Text>
+                  {displayUrl ? (
+                    <Text className="text-xs text-foreground-muted" numberOfLines={1}>
+                      {displayUrl}
+                    </Text>
+                  ) : null}
                 </View>
                 <Text className="text-sm text-foreground-muted">
                   {options.find((option) => option.value === selected)?.label}
