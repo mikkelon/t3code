@@ -90,7 +90,9 @@ builds. See [Updating T3 Code](./docs/user/updating.md).
    [Google Play](https://play.google.com/store/apps/details?id=com.t3tools.t3code),
    open **Settings → Environments**, add an environment and scan the QR code from
    `t3 pair --tailscale` on each machine. The store app pairs directly with fork
-   servers over Tailscale HTTPS; no account is involved. Update fork servers with
+   servers over Tailscale HTTPS; no account is involved. It needs a server on the
+   orchestration protocol it speaks, otherwise it shows **Client not supported**
+   until the store app is updated. Update fork servers with
    `t3 update` or from a desktop client: the phone's **Check for updates** looks at
    upstream's releases, which a fork server cannot install.
 5. **Remote simulators (optional):** on a Mac with Xcode (and/or a machine with the
