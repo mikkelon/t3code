@@ -29,6 +29,9 @@ import { isValidDistroName } from "../wsl/wslPathParsing.ts";
 
 export interface DesktopSettings {
   readonly localEnvironmentEnabled: boolean;
+  // "Don't run agents in the background": the app stops installing its
+  // background service on launch and runs its own backend instead.
+  readonly backgroundServiceDisabled: boolean;
   readonly linuxPasswordStore: LinuxPasswordStorePreference;
   readonly mainWindowBounds: DesktopWindowBounds | null;
   readonly mainWindowMaximized: boolean;
@@ -70,6 +73,7 @@ export const DEFAULT_MAIN_WINDOW_SIZE = {
 
 export const DEFAULT_DESKTOP_SETTINGS: DesktopSettings = {
   localEnvironmentEnabled: true,
+  backgroundServiceDisabled: false,
   linuxPasswordStore: DEFAULT_LINUX_PASSWORD_STORE,
   mainWindowBounds: null,
   mainWindowMaximized: false,
@@ -97,6 +101,7 @@ const optionalReadableKey = <S extends Schema.Top>(schema: S) =>
 
 const DesktopSettingsDocument = Schema.Struct({
   localEnvironmentEnabled: optionalReadableKey(Schema.Boolean),
+  backgroundServiceDisabled: optionalReadableKey(Schema.Boolean),
   linuxPasswordStore: optionalReadableKey(Schema.Unknown),
   mainWindowBounds: optionalReadableKey(Schema.NullOr(DesktopWindowBoundsDocument)),
   mainWindowMaximized: optionalReadableKey(Schema.Boolean),
@@ -155,6 +160,9 @@ export class DesktopAppSettings extends Context.Service<
     readonly get: Effect.Effect<DesktopSettings>;
     readonly setLocalEnvironmentEnabled: (
       enabled: boolean,
+    ) => Effect.Effect<DesktopSettingsChange, DesktopSettingsWriteError>;
+    readonly setBackgroundServiceDisabled: (
+      disabled: boolean,
     ) => Effect.Effect<DesktopSettingsChange, DesktopSettingsWriteError>;
     readonly setMainWindowBounds: (
       bounds: DesktopWindowBounds,
@@ -226,6 +234,7 @@ function normalizeDesktopSettingsDocument(
 
   return {
     localEnvironmentEnabled: parsed.localEnvironmentEnabled !== false,
+    backgroundServiceDisabled: parsed.backgroundServiceDisabled === true,
     linuxPasswordStore: normalizeLinuxPasswordStorePreference(parsed.linuxPasswordStore),
     mainWindowBounds,
     mainWindowMaximized: mainWindowBounds !== null && parsed.mainWindowMaximized === true,
@@ -251,6 +260,10 @@ function toDesktopSettingsDocument(
 
   if (settings.localEnvironmentEnabled !== defaults.localEnvironmentEnabled) {
     document.localEnvironmentEnabled = settings.localEnvironmentEnabled;
+  }
+
+  if (settings.backgroundServiceDisabled !== defaults.backgroundServiceDisabled) {
+    document.backgroundServiceDisabled = settings.backgroundServiceDisabled;
   }
 
   if (settings.linuxPasswordStore !== defaults.linuxPasswordStore) {
@@ -380,6 +393,15 @@ function setLocalEnvironmentEnabled(settings: DesktopSettings, enabled: boolean)
   return settings.localEnvironmentEnabled === enabled
     ? settings
     : { ...settings, localEnvironmentEnabled: enabled };
+}
+
+function setBackgroundServiceDisabled(
+  settings: DesktopSettings,
+  disabled: boolean,
+): DesktopSettings {
+  return settings.backgroundServiceDisabled === disabled
+    ? settings
+    : { ...settings, backgroundServiceDisabled: disabled };
 }
 
 function applyWslWindowsFallback(settings: DesktopSettings): DesktopSettings {
@@ -599,6 +621,13 @@ export const make = Effect.gen(function* () {
         return yield* persist((settings) => setLocalEnvironmentEnabled(settings, enabled));
       },
     ),
+    setBackgroundServiceDisabled: Effect.fn("desktop.settings.setBackgroundServiceDisabled")(
+      function* (disabled) {
+        yield* Effect.annotateCurrentSpan({ disabled });
+
+        return yield* persist((settings) => setBackgroundServiceDisabled(settings, disabled));
+      },
+    ),
     applyWslWindowsFallback: persist(applyWslWindowsFallback).pipe(
       Effect.withSpan("desktop.settings.applyWslWindowsFallback"),
     ),
@@ -660,6 +689,11 @@ export const layerTest = (initialSettings: DesktopSettings = DEFAULT_DESKTOP_SET
         setLocalEnvironmentEnabled: Effect.fn("DesktopAppSettings.setLocalEnvironmentEnabled")(
           function (enabled) {
             return update((settings) => setLocalEnvironmentEnabled(settings, enabled));
+          },
+        ),
+        setBackgroundServiceDisabled: Effect.fn("DesktopAppSettings.setBackgroundServiceDisabled")(
+          function (disabled) {
+            return update((settings) => setBackgroundServiceDisabled(settings, disabled));
           },
         ),
         applyWslWindowsFallback: update(applyWslWindowsFallback),
