@@ -1,5 +1,6 @@
 import { assert, describe, it } from "@effect/vitest";
 import * as NodeServices from "@effect/platform-node/NodeServices";
+import { CLI_RELEASE_REPOSITORY } from "@t3tools/shared/cliRelease";
 import * as NetService from "@t3tools/shared/Net";
 import { HostProcessArchitecture, HostProcessPlatform } from "@t3tools/shared/hostProcess";
 import * as Deferred from "effect/Deferred";
@@ -105,7 +106,12 @@ describe("ssh tunnel scripts", () => {
     assert.include(script, "T3_NODE_SCRIPT_PATH=''");
     assert.include(
       script,
-      "T3_RELEASE_BASE_URL='https://github.com/pingdotgg/t3code/releases/download'",
+      `T3_RELEASE_BASE_URL='https://github.com/${CLI_RELEASE_REPOSITORY}/releases/download'`,
+    );
+    // Fork releases are <core>-mk.<n>.
+    assert.include(
+      SshTunnel.buildRemoteT3RunnerScript({ archiveVersion: "0.0.46-mk.1" }),
+      "T3_ARCHIVE_VERSION='0.0.46-mk.1'",
     );
     assert.include(script, 'T3_RUNTIME_DIR="$HOME/.t3/runtime/versions/$T3_ARCHIVE_VERSION"');
     assert.include(script, 'T3_ARCHIVE="t3-$T3_ARCHIVE_VERSION-$T3_PLATFORM-$T3_ARCH.tar.gz"');
