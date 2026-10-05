@@ -17,6 +17,7 @@ import {
 import * as TestClock from "effect/testing/TestClock";
 
 import * as DesktopBackendPool from "./DesktopBackendPool.ts";
+import * as DesktopBackgroundService from "./DesktopBackgroundService.ts";
 import * as DesktopLocalEnvironmentAuth from "./DesktopLocalEnvironmentAuth.ts";
 
 const config = {
@@ -81,7 +82,14 @@ describe("DesktopLocalEnvironmentAuth", () => {
         ]),
       } as unknown as DesktopBackendPool.DesktopBackendPool["Service"]);
       const layerTest = DesktopLocalEnvironmentAuth.layer.pipe(
-        Layer.provide(Layer.mergeAll(layerPool, layerHttpClient, NodeCrypto.layerMac)),
+        Layer.provide(
+          Layer.mergeAll(
+            layerPool,
+            layerHttpClient,
+            NodeCrypto.layerMac,
+            DesktopBackgroundService.layerTest(),
+          ),
+        ),
       );
 
       const [first, second] = yield* Effect.gen(function* () {
@@ -152,7 +160,14 @@ describe("DesktopLocalEnvironmentAuth", () => {
         }).pipe(
           Effect.provide(
             DesktopLocalEnvironmentAuth.layer.pipe(
-              Layer.provide(Layer.mergeAll(poolLayer, httpClientLayer, NodeCrypto.layerMac)),
+              Layer.provide(
+                Layer.mergeAll(
+                  poolLayer,
+                  httpClientLayer,
+                  NodeCrypto.layerMac,
+                  DesktopBackgroundService.layerTest(),
+                ),
+              ),
             ),
           ),
         );
@@ -209,7 +224,14 @@ describe("DesktopLocalEnvironmentAuth", () => {
       const auth = yield* DesktopLocalEnvironmentAuth.DesktopLocalEnvironmentAuth.pipe(
         Effect.provide(
           DesktopLocalEnvironmentAuth.layer.pipe(
-            Layer.provide(Layer.mergeAll(layerPool, layerHttpClient, NodeCrypto.layerMac)),
+            Layer.provide(
+              Layer.mergeAll(
+                layerPool,
+                layerHttpClient,
+                NodeCrypto.layerMac,
+                DesktopBackgroundService.layerTest(),
+              ),
+            ),
           ),
         ),
       );

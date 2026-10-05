@@ -207,6 +207,18 @@ export const make = Effect.gen(function* () {
     return Option.none<string>();
   });
 
+  /**
+   * The background service's launcher (DesktopBackgroundService.linkLauncher):
+   * `~/.local/bin/t3` linked into the T3 home's `runtime/versions`. It already
+   * puts `t3` on PATH, so the setting offers nothing next to it.
+   */
+  const serviceLauncherOnPath = Effect.gen(function* () {
+    const directory = path.join(environment.homeDirectory, ".local", "bin");
+    const target = path.resolve(directory, yield* fs.readLink(path.join(directory, "t3")));
+    const relative = path.relative(path.join(environment.baseDir, "runtime", "versions"), target);
+    return relative.length > 0 && !relative.startsWith("..") && !path.isAbsolute(relative);
+  }).pipe(Effect.orElseSucceed(() => false));
+
   const startupLine = (installedPath: string) => {
     const setup = pathSetup({
       directory: path.dirname(installedPath),
@@ -245,6 +257,9 @@ export const make = Effect.gen(function* () {
       windows || (Option.isSome(found) && (yield* leadsHere(found.value)))
         ? found
         : Option.none<string>();
+    if (Option.isNone(found) && (yield* serviceLauncherOnPath)) {
+      return { supported: false, installedPath: null, onPath: false, launcherPath } as const;
+    }
     const shadowedBy = (yield* foreignFirstOnPath).pipe(
       Option.filter((first) => first !== Option.getOrUndefined(found)),
     );
