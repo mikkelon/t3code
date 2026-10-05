@@ -1,0 +1,387 @@
+name: Fork release
+
+# Builds this fork on GitHub-hosted runners and publishes it to this
+# repository's GitHub Releases. Upstream's release.yml needs paid runners,
+# npm trusted publishing, signing identities and the hosted T3 services, so
+# the fork does not run it.
+#
+# A release carries:
+# - CLI archives for linux-x64, linux-arm64 and darwin-arm64 plus SHA256SUMS,
+#   which the install scripts, `t3 update`, the background service and SSH
+#   device hosts download (names from packages/shared/src/cliRelease.ts).
+# - The Linux desktop app (AppImage and .deb, x64 and arm64) with the
+#   latest-linux*.yml manifests electron-updater follows.
+# There are no Windows builds and no macOS desktop build: without signing
+# identities the macOS app cannot update itself and Windows warns on every
+# install. Versions are <core>-mk.<n>; see scripts/resolve-fork-release.ts.
+#
+# Run it from the Actions tab (the version defaults to the next -mk.<n> for
+# the selected commit), or push a v<core>-mk.<n> tag.
+
+on:
+  push:
+    tags:
+      - "v*.*.*-mk.*"
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version to publish, for example 0.0.46-mk.2. Empty picks the next -mk.<n>."
+        required: false
+        type: string
+
+concurrency:
+  group: fork-release
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  prepare:
+    name: Resolve release version
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      tag: ${{ steps.version.outputs.tag }}
+      name: ${{ steps.version.outputs.name }}
+      ref: ${{ github.sha }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          sparse-checkout: |
+            /*
+            !/.repos/
+          sparse-checkout-cone-mode: false
+
+      - name: Setup Vite+
+        uses: voidzero-dev/setup-vp@v1
+        with:
+          node-version-file: package.json
+          cache: true
+          run-install: |
+            args:
+              - --filter=@t3tools/scripts...
+
+      - id: version
+        name: Resolve version
+        env:
+          REQUESTED: ${{ github.event_name == 'push' && github.ref_name || inputs.version }}
+        run: node scripts/resolve-fork-release.ts --requested "$REQUESTED" --github-output
+
+      # A dispatched release creates its tag on the commit it builds. An
+      # existing tag points somewhere else, and publishing to it would attach
+      # these builds to that other commit's release.
+      - name: Refuse an existing tag
+        if: github.event_name == 'workflow_dispatch'
+        env:
+          TAG: ${{ steps.version.outputs.tag }}
+        run: |
+          if git rev-parse -q --verify "refs/tags/$TAG" >/dev/null; then
+            echo "::error::$TAG already exists. Push the tag to rebuild it, or pick another version." >&2
+            exit 1
+          fi
+
+  # The platform-independent JS (server bundle, web client, Electron main) is
+  # built once and handed to every platform job as `js-bundle`.
+  build_bundle:
+    name: Build JS bundle
+    needs: [prepare]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ needs.prepare.outputs.ref }}
+          sparse-checkout: |
+            /*
+            !/.repos/
+          sparse-checkout-cone-mode: false
+
+      - name: Setup Vite+
+        uses: voidzero-dev/setup-vp@v1
+        with:
+          node-version-file: package.json
+          cache: true
+          run-install: |
+            args:
+              - --filter=t3...
+              - --filter=@t3tools/web...
+              - --filter=@t3tools/desktop...
+              - --filter=@t3tools/scripts...
+
+      - name: Align package versions to release version
+        run: node scripts/update-release-package-versions.ts "${{ needs.prepare.outputs.version }}"
+
+      # @t3tools/desktop#build compiles the Linux browser secret helper.
+      - name: Install browser secret helper build libraries
+        run: sudo apt-get update && sudo apt-get install -y libsecret-1-dev pkg-config
+
+      - name: Build JS bundle
+        run: vp run build:desktop
+
+      # Two paths under apps/ so the artifact root is apps/; consumers download
+      # into `apps` to restore both at their original locations.
+      - name: Upload JS bundle
+        uses: actions/upload-artifact@v7
+        with:
+          name: js-bundle
+          path: |
+            apps/server/dist
+            apps/desktop/dist-electron
+          if-no-files-found: error
+          retention-days: 1
+
+  # node-pty compiles from source on Linux, so each arch builds on its own
+  # hardware rather than cross-building.
+  linux:
+    name: Linux ${{ matrix.arch }}
+    needs: [prepare, build_bundle]
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 60
+    strategy:
+      fail-fast: true
+      matrix:
+        include:
+          - arch: x64
+            runner: ubuntu-24.04
+            rust_target: x86_64-unknown-linux-gnu
+          - arch: arm64
+            runner: ubuntu-24.04-arm
+            rust_target: aarch64-unknown-linux-gnu
+    env:
+      VERSION: ${{ needs.prepare.outputs.version }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ needs.prepare.outputs.ref }}
+          sparse-checkout: |
+            /*
+            !/.repos/
+          sparse-checkout-cone-mode: false
+
+      - name: Setup Vite+
+        uses: voidzero-dev/setup-vp@v1
+        with:
+          node-version-file: package.json
+          cache: true
+          run-install: |
+            args:
+              - --filter=@t3tools/desktop...
+              - --filter=t3...
+              - --filter=@t3tools/scripts...
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.rust_target }}
+
+      - name: Install Linux desktop build libraries
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libsecret-1-dev pkg-config imagemagick
+
+      - name: Align package versions to release version
+        run: node scripts/update-release-package-versions.ts "$VERSION"
+
+      - name: Download JS bundle
+        uses: actions/download-artifact@v8
+        with:
+          name: js-bundle
+          path: apps
+
+      # Unsigned: Linux has no code signing, and electron-updater on Linux
+      # does not check signatures. GITHUB_REPOSITORY gives the build its
+      # update feed (this repository's releases).
+      - name: Build desktop artifact
+        run: |
+          vp run dist:desktop:artifact \
+            --platform linux \
+            --target AppImage \
+            --arch "${{ matrix.arch }}" \
+            --build-version "$VERSION" \
+            --skip-build \
+            --verbose
+
+      # Keep in step with SEA_NODE_VERSION in apps/server/vite.config.ts.
+      - name: Build CLI single-executable
+        env:
+          VP_NODE_VERSION: "26.8.2"
+        run: node apps/server/scripts/cli.ts build-exe --verbose
+
+      # The desktop build compiled the resource monitor for this target.
+      - name: Build CLI archive
+        run: |
+          set -euo pipefail
+          monitor_dir="$RUNNER_TEMP/cli-resource-monitor/linux-${{ matrix.arch }}"
+          mkdir -p "$monitor_dir"
+          cp "native/resource-monitor/target/${{ matrix.rust_target }}/release/t3-resource-monitor" "$monitor_dir/"
+          node scripts/build-cli-archive.ts \
+            --platform linux \
+            --arch "${{ matrix.arch }}" \
+            --version "$VERSION" \
+            --resource-monitor-dir "$RUNNER_TEMP/cli-resource-monitor" \
+            --output-dir release-cli
+
+      - name: Smoke-test CLI archive
+        run: node scripts/smoke-cli-archive.ts --archive release-cli/* --expect-version "$VERSION"
+
+      # builder-debug.yml is electron-builder's config dump, not a feed.
+      - name: Collect desktop assets
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          mkdir -p release-publish
+          for file in release/*.AppImage release/*.deb release/*.blockmap release/*.yml; do
+            [[ "$file" == */builder-debug.yml ]] && continue
+            cp "$file" release-publish/
+          done
+          ls -l release-publish
+
+      - name: Upload desktop assets
+        uses: actions/upload-artifact@v7
+        with:
+          name: desktop-linux-${{ matrix.arch }}
+          path: release-publish/*
+          if-no-files-found: error
+
+      - name: Upload CLI archive
+        uses: actions/upload-artifact@v7
+        with:
+          name: cli-linux-${{ matrix.arch }}
+          path: release-cli/*
+          if-no-files-found: error
+
+  # The Mac is used as an SSH device host, which downloads the CLI archive of
+  # the connecting client's version. The archive is signed ad hoc.
+  darwin_cli:
+    name: macOS arm64 CLI
+    needs: [prepare, build_bundle]
+    runs-on: macos-latest
+    timeout-minutes: 45
+    env:
+      VERSION: ${{ needs.prepare.outputs.version }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ needs.prepare.outputs.ref }}
+          sparse-checkout: |
+            /*
+            !/.repos/
+          sparse-checkout-cone-mode: false
+
+      - name: Setup Vite+
+        uses: voidzero-dev/setup-vp@v1
+        with:
+          node-version-file: package.json
+          cache: true
+          run-install: |
+            args:
+              - --filter=t3...
+              - --filter=@t3tools/scripts...
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-darwin
+
+      - name: Align package versions to release version
+        run: node scripts/update-release-package-versions.ts "$VERSION"
+
+      - name: Download JS bundle
+        uses: actions/download-artifact@v8
+        with:
+          name: js-bundle
+          path: apps
+
+      - name: Build resource monitor
+        run: cargo build --locked --release --manifest-path native/resource-monitor/Cargo.toml --target aarch64-apple-darwin
+
+      # Keep in step with SEA_NODE_VERSION in apps/server/vite.config.ts.
+      - name: Build CLI single-executable
+        env:
+          VP_NODE_VERSION: "26.8.2"
+        run: node apps/server/scripts/cli.ts build-exe --verbose
+
+      - name: Build CLI archive
+        run: |
+          set -euo pipefail
+          monitor_dir="$RUNNER_TEMP/cli-resource-monitor/darwin-arm64"
+          mkdir -p "$monitor_dir"
+          cp native/resource-monitor/target/aarch64-apple-darwin/release/t3-resource-monitor "$monitor_dir/"
+          node scripts/build-cli-archive.ts \
+            --platform mac \
+            --arch arm64 \
+            --version "$VERSION" \
+            --resource-monitor-dir "$RUNNER_TEMP/cli-resource-monitor" \
+            --output-dir release-cli
+
+      - name: Smoke-test CLI archive
+        run: node scripts/smoke-cli-archive.ts --archive release-cli/* --expect-version "$VERSION"
+
+      - name: Upload CLI archive
+        uses: actions/upload-artifact@v7
+        with:
+          name: cli-mac-arm64
+          path: release-cli/*
+          if-no-files-found: error
+
+  release:
+    name: Publish GitHub Release
+    needs: [prepare, linux, darwin_cli]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    permissions:
+      contents: write
+    steps:
+      - name: Download desktop assets
+        uses: actions/download-artifact@v8
+        with:
+          pattern: desktop-*
+          merge-multiple: true
+          path: release-assets
+
+      - name: Download CLI archives
+        uses: actions/download-artifact@v8
+        with:
+          pattern: cli-*
+          merge-multiple: true
+          path: release-assets
+
+      # Installers verify archives against this file.
+      - name: Write CLI archive checksums
+        run: |
+          set -euo pipefail
+          cd release-assets
+          for key in linux-x64 linux-arm64 darwin-arm64; do
+            archive="t3-${{ needs.prepare.outputs.version }}-$key.tar.gz"
+            [[ -f "$archive" ]] || { echo "Missing $archive" >&2; exit 1; }
+          done
+          sha256sum t3-*.tar.gz > SHA256SUMS
+          cat SHA256SUMS
+
+      # Not a prerelease and marked latest: the desktop updater on the stable
+      # channel reads GitHub's "latest release".
+      - name: Publish release
+        uses: softprops/action-gh-release@v3
+        with:
+          tag_name: ${{ needs.prepare.outputs.tag }}
+          target_commitish: ${{ needs.prepare.outputs.ref }}
+          name: ${{ needs.prepare.outputs.name }}
+          generate_release_notes: true
+          prerelease: false
+          make_latest: true
+          files: |
+            release-assets/*.AppImage
+            release-assets/*.deb
+            release-assets/*.blockmap
+            release-assets/*.yml
+            release-assets/*.tar.gz
+            release-assets/SHA256SUMS
+          fail_on_unmatched_files: true
+          token: ${{ github.token }}
