@@ -21,6 +21,7 @@ import * as DesktopWindow from "../window/DesktopWindow.ts";
 import * as PreviewPasskeys from "../preview/Passkeys.ts";
 import * as DesktopBackendManager from "../backend/DesktopBackendManager.ts";
 import * as DesktopBackendPool from "../backend/DesktopBackendPool.ts";
+import * as DesktopBackgroundService from "../backend/DesktopBackgroundService.ts";
 import * as DesktopHomeOwner from "../backend/DesktopHomeOwner.ts";
 import * as DesktopLocalEnvironmentAuth from "../backend/DesktopLocalEnvironmentAuth.ts";
 import * as DesktopEnvironment from "./DesktopEnvironment.ts";
@@ -169,6 +170,23 @@ const stopAllPoolInstances = Effect.fn("desktop.app.stopAllPoolInstances")(
   },
 );
 
+// A T3 server already owns this home, the background service is installed for
+// it, or the app installs the service now: adopt that server instead of
+// embedding a second backend on the same database. Resolves false when the
+// app runs its own backend after all.
+const adoptLocalServer = Effect.fn("desktop.bootstrap.adoptLocalEnvironment")(function* (
+  decision: DesktopBackgroundService.LocalServerDecision,
+) {
+  const outcome = yield* (yield* DesktopBackgroundService.DesktopBackgroundService).adopt(decision);
+  if (outcome === "embed") return false;
+  if (outcome === "quit") {
+    yield* Ref.set((yield* DesktopState.DesktopState).quitting, true);
+    yield* (yield* DesktopShutdown.DesktopShutdown).request;
+    yield* (yield* ElectronApp.ElectronApp).quit;
+  }
+  return true;
+});
+
 // Spawns the local backend as soon as the protocol, IPC, and legacy storage that every window needs exist.
 const startLocalBackend = Effect.gen(function* () {
   const state = yield* DesktopState.DesktopState;
@@ -195,6 +213,11 @@ const startLocalBackend = Effect.gen(function* () {
 
   if (!settings.localEnvironmentEnabled) {
     yield* logBootstrapInfo("bootstrap skipping local environment (disabled in settings)");
+    return false;
+  }
+
+  const localServer = yield* (yield* DesktopBackgroundService.DesktopBackgroundService).decide;
+  if (localServer._tag !== "Embed" && (yield* adoptLocalServer(localServer))) {
     return false;
   }
 
@@ -282,7 +305,13 @@ const bootstrap = Effect.fn("desktop.bootstrap")(function* (backendStarted: bool
   const snapShot = yield* DesktopSnapShot.DesktopSnapShot;
   const appActivation = yield* DesktopAppActivation.DesktopAppActivation;
   const settings = yield* desktopSettings.get;
-  if (settings.localEnvironmentEnabled && (!backendStarted || (yield* Ref.get(state.quitting)))) {
+  const adopted = backendStarted
+    ? Option.none()
+    : yield* (yield* DesktopBackgroundService.DesktopBackgroundService).adopted;
+  if (
+    settings.localEnvironmentEnabled &&
+    ((!backendStarted && Option.isNone(adopted)) || (yield* Ref.get(state.quitting)))
+  ) {
     return;
   }
 
@@ -304,6 +333,20 @@ const bootstrap = Effect.fn("desktop.bootstrap")(function* (backendStarted: bool
     if (!(yield* Ref.get(state.quitting))) {
       yield* desktopWindow.createMainIfBackendReady;
     }
+    return;
+  }
+
+  if (Option.isSome(adopted)) {
+    yield* desktopWindow.handleBackendReady(adopted.value.httpBaseUrl).pipe(
+      Effect.catch((error) =>
+        logBootstrapWarning("failed to open main window for the adopted server", {
+          error: error.message,
+        }),
+      ),
+    );
+    yield* appActivation.start.pipe(
+      Effect.catch((error) => logStartupError("desktop app control socket unavailable", { error })),
+    );
     return;
   }
 

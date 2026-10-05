@@ -3,11 +3,13 @@ import * as NodeFSP from "node:fs/promises";
 
 import type { DesktopCliCommandState } from "@t3tools/contracts";
 import * as HostProcess from "@t3tools/shared/HostProcess";
+import { readLauncherTarget } from "@t3tools/shared/posixLauncher";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
+import * as Path from "effect/Path";
 import * as Random from "effect/Random";
 import * as Schema from "effect/Schema";
 import * as Semaphore from "effect/Semaphore";
@@ -207,6 +209,27 @@ export const make = Effect.gen(function* () {
     return Option.none<string>();
   });
 
+  /**
+   * The background service's launcher (DesktopBackgroundService.linkLauncher):
+   * `~/.local/bin/t3` leading into the T3 home's `runtime/versions`. It already
+   * puts `t3` on PATH, so the setting offers nothing next to it.
+   */
+  const serviceLauncherOnPath = Effect.gen(function* () {
+    const current = yield* readLauncherTarget(
+      path.join(environment.homeDirectory, ".local", "bin", "t3"),
+    );
+    if (current === undefined) return false;
+    const relative = path.relative(
+      path.join(environment.baseDir, "runtime", "versions"),
+      current.target,
+    );
+    return relative.length > 0 && !relative.startsWith("..") && !path.isAbsolute(relative);
+  }).pipe(
+    Effect.provideService(FileSystem.FileSystem, fs),
+    Effect.provideService(Path.Path, path),
+    Effect.orElseSucceed(() => false),
+  );
+
   const startupLine = (installedPath: string) => {
     const setup = pathSetup({
       directory: path.dirname(installedPath),
@@ -245,6 +268,9 @@ export const make = Effect.gen(function* () {
       windows || (Option.isSome(found) && (yield* leadsHere(found.value)))
         ? found
         : Option.none<string>();
+    if (Option.isNone(found) && (yield* serviceLauncherOnPath)) {
+      return { supported: false, installedPath: null, onPath: false, launcherPath } as const;
+    }
     const shadowedBy = (yield* foreignFirstOnPath).pipe(
       Option.filter((first) => first !== Option.getOrUndefined(found)),
     );
