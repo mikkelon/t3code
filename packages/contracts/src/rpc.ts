@@ -327,6 +327,7 @@ import {
   ServerSettingsError,
   ServerSettingsPatch,
 } from "./settings.ts";
+import { TailscaleServeError, TailscaleServeInput, TailscaleServeState } from "./remoteAccess.ts";
 import {
   ScheduledTaskDeleteInput,
   ScheduledTaskDeleteResult,
@@ -471,6 +472,8 @@ export const WS_METHODS = {
   serverGetDatabaseStorage: "server.getDatabaseStorage",
   serverGetSettings: "server.getSettings",
   serverUpdateSettings: "server.updateSettings",
+  serverGetTailscaleServe: "server.getTailscaleServe",
+  serverSetTailscaleServe: "server.setTailscaleServe",
   serverDiscoverSourceControl: "server.discoverSourceControl",
   serverSearchAcpRegistry: "server.searchAcpRegistry",
   serverPrepareAcpRegistryAgent: "server.prepareAcpRegistryAgent",
@@ -751,6 +754,18 @@ const WsServerUpdateSettingsRpc = Rpc.make(WS_METHODS.serverUpdateSettings, {
   }),
   success: ServerSettings,
   error: Schema.Union([ServerSettingsError, EnvironmentAuthorizationError]),
+});
+
+const WsServerGetTailscaleServeRpc = Rpc.make(WS_METHODS.serverGetTailscaleServe, {
+  payload: Schema.Struct({}),
+  success: TailscaleServeState,
+  error: EnvironmentAuthorizationError,
+});
+
+const WsServerSetTailscaleServeRpc = Rpc.make(WS_METHODS.serverSetTailscaleServe, {
+  payload: TailscaleServeInput,
+  success: TailscaleServeState,
+  error: Schema.Union([TailscaleServeError, EnvironmentAuthorizationError]),
 });
 
 const WsServerDiscoverSourceControlRpc = Rpc.make(WS_METHODS.serverDiscoverSourceControl, {
@@ -1861,6 +1876,8 @@ export const WsRpcGroup = RpcGroup.make(
   WsServerGetDatabaseStorageRpc,
   WsServerGetSettingsRpc,
   WsServerUpdateSettingsRpc,
+  WsServerGetTailscaleServeRpc,
+  WsServerSetTailscaleServeRpc,
   WsServerDiscoverSourceControlRpc,
   WsServerSearchAcpRegistryRpc,
   WsServerPrepareAcpRegistryAgentRpc,
