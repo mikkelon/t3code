@@ -46,7 +46,7 @@ const fetchDescriptor = Effect.fn("clientRuntime.connection.remote.fetchDescript
   );
 });
 
-export const make = Effect.gen(function* () {
+const make = Effect.gen(function* () {
   const presentation = yield* ClientCapabilities.ClientPresentation;
   const httpClient = yield* HttpClient.HttpClient;
   const bearerDescriptors = yield* Ref.make<
