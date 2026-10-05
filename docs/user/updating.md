@@ -22,11 +22,11 @@ restart from the update button when you are ready. A server still restarting
 finishes on its own, and the button keeps showing it after the desktop app
 restarts.
 
-Each server checks that it can install the release before it restarts. If the
-release is not available to a server yet, its update fails, the server keeps
-running, and you can retry. The confirmation lists each machine it skips and
-why, such as a machine that is offline or needs a manual update. Use
-**Settings → Environments** for those.
+Each server checks that it can install the release before it restarts. Servers
+install from this fork's GitHub Releases. If the release is not published there
+yet, that server's update fails, the server keeps running, and you can retry.
+The confirmation lists each machine it skips and why, such as a machine that is
+offline or needs a manual update. Use **Settings → Environments** for those.
 
 If a desktop app restarts on its old version, T3 Code tells you the update did
 not apply. It does not install that version again on its own, even when another
@@ -118,9 +118,10 @@ asks before restarting the background service; if you decline, run
 stop it and start it again afterwards with your usual options such as `--host`
 or `--tailscale-serve`.
 
-If you run the server with `npx` rather than an installed `t3`, there is
-nothing to update on the host: stop the server and relaunch it as
-`npx t3@<client-version>` with the same subcommand and options.
+This fork publishes only stable releases, versioned `<core>-mk.<n>` (for
+example `0.0.46-mk.2`), and no npm package: `npx t3` runs upstream T3 Code. The
+nightly channel (`t3 update --channel nightly`, or **Nightly** as the desktop
+app's **Update track**) has nothing to install.
 
 ## If an update fails
 
@@ -158,13 +159,13 @@ details** to include the error in a bug report.
 
 ## Registries and proxies
 
-Each server checks T3 Code releases, and providers installed with npm, through
-its own npm, so the checks use npm's configured registry, authentication, and
-proxy settings. Providers installed with Homebrew or pnpm check through those
-tools.
-Configure npm on the server's machine. If that registry cannot be reached, the
-release shows as unavailable; T3 Code does not try the public registry instead.
-Machines without npm check the public npm registry directly.
+Each server checks T3 Code releases on this fork's GitHub Releases. Providers
+installed with npm check through the server's own npm, so those checks use
+npm's configured registry, authentication, and proxy settings. If that registry
+cannot be reached, the provider update shows as unavailable; T3 Code does not
+try the public registry instead. Machines without npm check the public npm
+registry directly. Providers installed with Homebrew or pnpm check through
+those tools.
 
 ## Update providers
 
@@ -186,9 +187,11 @@ status and refresh it again.
 
 To update an environment from your phone, open **Settings → Environments** and
 select it. **Check for updates** finds the latest release on that environment's
-current release channel. Keep the app open while the environment updates and
-reconnects. Hosts that cannot update remotely show instructions for updating on
-the machine instead.
+current release channel. The store app looks up upstream's releases, which a
+server running this fork cannot install; update those with `t3 update` on the
+host or from a web or desktop client instead. Keep the app open while the
+environment updates and reconnects. Hosts that cannot update remotely show
+instructions for updating on the machine instead.
 
 The same page lets you refresh provider status and update supported providers.
 These controls require a connected environment and permission to operate it.
