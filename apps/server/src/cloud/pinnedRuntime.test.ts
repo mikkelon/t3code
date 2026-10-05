@@ -4,6 +4,7 @@ import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Fiber from "effect/Fiber";
+import * as Layer from "effect/Layer";
 import * as Path from "effect/Path";
 import { HttpClient, HttpClientResponse } from "effect/http";
 import * as ChildProcessSpawner from "effect/process/ChildProcessSpawner";
@@ -395,3 +396,92 @@ it.layer(NodeServices.layer)("ensurePinnedRuntimeInstalled", (it) => {
     }),
   );
 });
+
+// The desktop app stages the archive it ships. These run the host's real tar
+// against a real archive, so the platform check reads what tar lists.
+const makeLocalArchive = Effect.fn("test.make_local_archive")(function* (stem: string) {
+  const fs = yield* FileSystem.FileSystem;
+  const path = yield* Path.Path;
+  const runner = yield* ProcessRunner.ProcessRunner;
+  const root = yield* fs.makeTempDirectoryScoped({ prefix: "t3-local-archive-" });
+  yield* fs.makeDirectory(path.join(root, stem, "client"), { recursive: true });
+  yield* fs.writeFileString(path.join(root, stem, "t3"), "#!/bin/sh\necho t3 v1.2.3\n");
+  yield* fs.writeFileString(path.join(root, stem, "client", "index.html"), "<html></html>\n");
+  const archive = path.join(root, `${stem}.tar.gz`);
+  const result = yield* runner.run({ command: "tar", args: ["-czf", archive, "-C", root, stem] });
+  assert.equal(result.code, 0);
+  return archive;
+});
+
+const noDownloads = HttpClient.make(() => Effect.die("a local archive must not download"));
+
+it.layer(Layer.provideMerge(ProcessRunner.layer, NodeServices.layer))(
+  "ensurePinnedRuntimeInstalled from a local archive",
+  (it) => {
+    const install = (baseDir: string, archive: string, arch = "x64") =>
+      Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem;
+        const path = yield* Path.Path;
+        const runner = yield* ProcessRunner.ProcessRunner;
+        return yield* ensurePinnedRuntimeInstalled({
+          baseDir,
+          version,
+          fs,
+          path,
+          platform: "linux",
+          arch,
+          httpClient: noDownloads,
+          localArchive: archive,
+          runner,
+          validate: (staging) =>
+            fs.readFileString(staging.entryPath).pipe(
+              Effect.flatMap((source) =>
+                source.includes("t3 v1.2.3")
+                  ? Effect.void
+                  : Effect.fail(new PinnedRuntimeInstallError({ step: "validating" })),
+              ),
+              Effect.orDie,
+            ),
+        });
+      });
+
+    it.effect("unpacks the archive without a network and re-runs as a no-op", () =>
+      Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem;
+        const path = yield* Path.Path;
+        const baseDir = yield* fs.makeTempDirectoryScoped({ prefix: "t3-pinned-local-" });
+        const archive = yield* makeLocalArchive(`t3-${version}-linux-x64`);
+
+        const paths = yield* install(baseDir, archive);
+        assert.equal(paths.versionDir, path.join(baseDir, "runtime", "versions", version));
+        assert.include(yield* fs.readFileString(paths.entryPath), "t3 v1.2.3");
+        assert.isTrue(yield* fs.exists(path.join(paths.versionDir, "client", "index.html")));
+        assert.equal(yield* fs.readFileString(paths.sentinelPath), `${version}\n`);
+        // The archive is the app's own file: it stays where it was.
+        assert.isTrue(yield* fs.exists(archive));
+
+        // Already staged: the archive is not read again.
+        yield* fs.remove(archive);
+        assert.deepEqual(yield* install(baseDir, archive), paths);
+      }),
+    );
+
+    it.effect.each([
+      { name: "another architecture", stem: `t3-${version}-linux-arm64` },
+      { name: "another version", stem: "t3-1.2.4-linux-x64" },
+    ])("refuses an archive for $name before unpacking it", ({ stem }) =>
+      Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem;
+        const path = yield* Path.Path;
+        const baseDir = yield* fs.makeTempDirectoryScoped({ prefix: "t3-pinned-local-arch-" });
+        const archive = yield* makeLocalArchive(stem);
+
+        const error = yield* install(baseDir, archive).pipe(Effect.flip);
+
+        assert.equal(error._tag, "PinnedRuntimeInstallError");
+        assert.include(error.message, `holds t3-${version}-linux-x64 (found ${stem})`);
+        assert.deepEqual(yield* fs.readDirectory(path.join(baseDir, "runtime", "versions")), []);
+      }),
+    );
+  },
+);

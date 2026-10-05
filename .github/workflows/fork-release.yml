@@ -11,7 +11,8 @@ name: Fork release
 #   desktop-managed SSH environments download (names from
 #   packages/shared/src/cliRelease.ts).
 # - The Linux desktop app (AppImage and .deb, x64 and arm64) with the
-#   latest-linux*.yml manifests electron-updater follows.
+#   latest-linux*.yml manifests electron-updater follows. Each embeds the CLI
+#   archive of its architecture, which it installs as the background service.
 # There are no Windows builds and no macOS desktop build: without signing
 # identities the macOS app cannot update itself and Windows warns on every
 # install. Versions are <core>-mk.<n>; see scripts/resolve-fork-release.ts.
@@ -202,18 +203,10 @@ jobs:
           name: js-bundle
           path: apps
 
-      # Unsigned: Linux has no code signing, and electron-updater on Linux
-      # does not check signatures. GITHUB_REPOSITORY gives the build its
-      # update feed (this repository's releases).
-      - name: Build desktop artifact
-        run: |
-          vp run dist:desktop:artifact \
-            --platform linux \
-            --target AppImage \
-            --arch "${{ matrix.arch }}" \
-            --build-version "$VERSION" \
-            --skip-build \
-            --verbose
+      # The CLI archive is built first: the desktop app embeds it as the
+      # runtime of its background service.
+      - name: Build resource monitor
+        run: cargo build --locked --release --manifest-path native/resource-monitor/Cargo.toml --target ${{ matrix.rust_target }}
 
       # Keep in step with SEA_NODE_VERSION in apps/server/vite.config.ts.
       - name: Build CLI single-executable
@@ -221,7 +214,6 @@ jobs:
           VP_NODE_VERSION: "26.8.2"
         run: node apps/server/scripts/cli.ts build-exe --verbose
 
-      # The desktop build compiled the resource monitor for this target.
       - name: Build CLI archive
         run: |
           set -euo pipefail
@@ -237,6 +229,23 @@ jobs:
 
       - name: Smoke-test CLI archive
         run: node scripts/smoke-cli-archive.ts --archive release-cli/* --expect-version "$VERSION"
+
+      # Unsigned: Linux has no code signing, and electron-updater on Linux
+      # does not check signatures. GITHUB_REPOSITORY gives the build its
+      # update feed (this repository's releases). The build refuses a CLI
+      # archive for another version or architecture.
+      - name: Build desktop artifact
+        env:
+          T3CODE_DESKTOP_REUSE_RESOURCE_MONITOR: "true"
+        run: |
+          vp run dist:desktop:artifact \
+            --platform linux \
+            --target AppImage \
+            --arch "${{ matrix.arch }}" \
+            --build-version "$VERSION" \
+            --service-runtime "release-cli/t3-$VERSION-linux-${{ matrix.arch }}.tar.gz" \
+            --skip-build \
+            --verbose
 
       # Installed apps update from the manifest, which electron-builder writes
       # only when the build has a publish config. It lists the AppImage, whose

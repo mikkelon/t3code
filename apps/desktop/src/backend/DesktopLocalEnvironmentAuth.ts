@@ -15,6 +15,7 @@ import * as Semaphore from "effect/Semaphore";
 import * as HttpClient from "effect/http/HttpClient";
 
 import * as DesktopBackendPool from "./DesktopBackendPool.ts";
+import * as DesktopBackgroundService from "./DesktopBackgroundService.ts";
 
 // A loopback /oauth/token exchange can fail transiently while the backend
 // settles (a 502-504, a refused or reset connection, a timeout). Retry those
@@ -70,6 +71,7 @@ export class DesktopLocalEnvironmentAuth extends Context.Service<
 /** @public Service construction is part of the canonical Effect module API. */
 export const make = Effect.gen(function* () {
   const pool = yield* DesktopBackendPool.DesktopBackendPool;
+  const backgroundService = yield* DesktopBackgroundService.DesktopBackgroundService;
   const httpClient = yield* HttpClient.HttpClient;
   const tokenRef = yield* Ref.make(Option.none<string>());
   const mutex = yield* Semaphore.make(1);
@@ -77,6 +79,13 @@ export const make = Effect.gen(function* () {
   const getBearerToken = mutex
     .withPermits(1)(
       Effect.gen(function* () {
+        if (Option.isSome(yield* backgroundService.adopted)) {
+          return yield* backgroundService.getBearerToken.pipe(
+            Effect.mapError(
+              (cause) => new DesktopLocalEnvironmentAuthSessionBootstrapError({ cause }),
+            ),
+          );
+        }
         const cached = yield* Ref.get(tokenRef);
         if (Option.isSome(cached)) {
           return cached.value;
