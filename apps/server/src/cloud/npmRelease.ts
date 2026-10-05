@@ -3,7 +3,11 @@ import {
   ServerNpmReleaseInput,
   type ServerNpmRelease,
 } from "@t3tools/contracts";
-import { npmReleaseDatabaseMigration } from "@t3tools/shared/cliRelease";
+import {
+  CLI_RELEASE_REPOSITORY,
+  cliReleaseApiUrl,
+  npmReleaseDatabaseMigration,
+} from "@t3tools/shared/cliRelease";
 import { resolveCommandPath } from "@t3tools/shared/shell";
 import * as Cache from "effect/Cache";
 import * as Context from "effect/Context";
@@ -127,6 +131,57 @@ export const make = Effect.fn("NpmRelease.make")(function* () {
   });
 });
 
-export const layer = Layer.effect(NpmRelease, make()).pipe(
-  Layer.provide([ProcessRunner.layer, FetchHttpClient.layer]),
+const isVersion = Schema.is(Version);
+const decodeForkRelease = Schema.decodeUnknownOption(
+  Schema.fromJsonString(Schema.Struct({ tag_name: Schema.String })),
+);
+
+/** This fork's servers install from its GitHub Releases, which carry no nightly track. */
+export const makeForkReleases = Effect.fn("NpmRelease.makeForkReleases")(function* () {
+  const http = yield* HttpClient.HttpClient;
+  const cache = yield* Cache.make({
+    capacity: 32,
+    timeToLive: Duration.minutes(1),
+    lookup: Effect.fn("NpmRelease.lookupForkRelease")(function* (spec: string) {
+      if (spec === "nightly") return null;
+      const unreachable = new ServerNpmReleaseError({
+        reason: "GitHub Releases could not be reached.",
+      });
+      const json = yield* Effect.gen(function* () {
+        const response = yield* http.get(
+          spec === "latest"
+            ? `https://api.github.com/repos/${CLI_RELEASE_REPOSITORY}/releases/latest`
+            : cliReleaseApiUrl(spec),
+        );
+        if (response.status === 404) return Option.none<string>();
+        if (response.status < 200 || response.status >= 300) return yield* unreachable;
+        return Option.some(yield* response.text);
+      }).pipe(
+        Effect.timeout(Duration.seconds(15)),
+        Effect.mapError(() => unreachable),
+      );
+      if (Option.isNone(json)) return null;
+      const version = Option.getOrUndefined(decodeForkRelease(json.value))?.tag_name.slice(1);
+      if (!version || !isVersion(version) || (spec !== "latest" && version !== spec)) {
+        return yield* new ServerNpmReleaseError({
+          reason: "GitHub returned invalid release metadata.",
+        });
+      }
+      return { version };
+    }),
+  });
+  return NpmRelease.of({
+    get: Effect.fn("NpmRelease.get")(function* (input) {
+      const { spec } = yield* decodeInput(input).pipe(
+        Effect.mapError(
+          () => new ServerNpmReleaseError({ reason: "Invalid release version or track." }),
+        ),
+      );
+      return yield* Cache.get(cache, spec);
+    }),
+  });
+});
+
+export const layer = Layer.effect(NpmRelease, makeForkReleases()).pipe(
+  Layer.provide(FetchHttpClient.layer),
 );
