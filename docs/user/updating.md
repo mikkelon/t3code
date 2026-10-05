@@ -59,9 +59,10 @@ asks before restarting the background service; if you decline, run
 stop it and start it again afterwards with your usual options such as `--host`
 or `--tailscale-serve`.
 
-If you run the server with `npx` rather than an installed `t3`, there is
-nothing to update on the host: stop the server and relaunch it as
-`npx t3@<client-version>` with the same subcommand and options.
+This fork publishes only stable releases, versioned `<core>-mk.<n>` (for
+example `0.0.46-mk.2`), and no npm package: `npx t3` runs upstream T3 Code. The
+nightly channel (`t3 update --channel nightly`, or **Nightly** as the desktop
+app's **Update track**) has nothing to install.
 
 ## If an update fails
 
@@ -83,9 +84,11 @@ offer a manual update command are not included.
 
 To update an environment from your phone, open **Settings → Environments** and
 select it. **Check for updates** finds the latest release on that environment's
-current release channel. Keep the app open while the environment updates and
-reconnects. Hosts that cannot update remotely show instructions for updating on
-the machine instead.
+current release channel. The store app looks up upstream's releases, which a
+server running this fork cannot install; update those with `t3 update` on the
+host or from a web or desktop client instead. Keep the app open while the
+environment updates and reconnects. Hosts that cannot update remotely show
+instructions for updating on the machine instead.
 
 The same page lets you refresh provider status and update supported providers.
 These controls require a connected environment and permission to operate it.
