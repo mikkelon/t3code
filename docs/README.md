@@ -59,3 +59,4 @@ source alone does not explain. Most code changes do not need an internal documen
 - [Observability](./operations/observability.md)
 - [Relay observability](./operations/relay-observability.md)
 - [Mobile app store screenshots](./operations/mobile-app-store-screenshots.md)
+- [Syncing the fork with upstream](./operations/fork-sync.md)
