@@ -359,6 +359,10 @@
       "types": "./src/dateTime.ts",
       "import": "./src/dateTime.ts"
     },
+    "./bootServiceUnit": {
+      "types": "./src/bootServiceUnit.ts",
+      "import": "./src/bootServiceUnit.ts"
+    },
     "./cliRelease": {
       "types": "./src/cliRelease.ts",
       "import": "./src/cliRelease.ts"

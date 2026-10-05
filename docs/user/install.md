@@ -27,8 +27,11 @@ line to add. Set `T3CODE_VERSION` to pin an exact version, such as
 | Start the server and open the web app            | `t3`                                                      |
 | Start the server without a browser               | `t3 serve`                                                |
 | Keep it running in the background (macOS, Linux) | `t3 service install` ([details](./background-service.md)) |
-| Move to the newest release                       | `t3 update`                                               |
-| Remove it again                                  | `t3 uninstall`                                            |
+
+The desktop app installs the background service by itself, so a machine with
+the desktop app needs none of these commands.
+| Move to the newest release | `t3 update` |
+| Remove it again | `t3 uninstall` |
 
 Run `t3 help` or `t3 --help` for the full reference. To start in a new working
 directory, use an explicit path such as `t3 ./my-project`. A bare directory name
@@ -66,6 +69,11 @@ not this fork. This fork publishes no macOS or Windows desktop builds; see
 Both Linux builds update themselves from this fork's releases. The `.deb` asks
 for your password to install each update. If your desktop has no password
 prompt, the update fails. Download the new `.deb` and install it the same way.
+
+On its first launch, the app installs T3 Code's
+[background service](./background-service.md#the-desktop-app-and-the-service)
+and runs your agents there, so they keep working when you close the window.
+Updating the app updates the service.
 
 ### Windows Subsystem for Linux
 

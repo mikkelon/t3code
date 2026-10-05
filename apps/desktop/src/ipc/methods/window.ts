@@ -25,6 +25,7 @@ import * as Schema from "effect/Schema";
 
 import * as DesktopBackendConfiguration from "../../backend/DesktopBackendConfiguration.ts";
 import * as DesktopBackendPool from "../../backend/DesktopBackendPool.ts";
+import * as DesktopBackgroundService from "../../backend/DesktopBackgroundService.ts";
 import * as DesktopLocalEnvironmentAuth from "../../backend/DesktopLocalEnvironmentAuth.ts";
 import * as DesktopEnvironment from "../../app/DesktopEnvironment.ts";
 import * as DesktopAppSettings from "../../settings/DesktopAppSettings.ts";
@@ -99,6 +100,18 @@ export const getLocalEnvironmentBootstraps = DesktopIpc.makeSyncIpcMethod({
     const configuration = yield* DesktopBackendConfiguration.DesktopBackendConfiguration;
     const instances = yield* pool.list;
     const bootstraps: DesktopEnvironmentBootstrap[] = [];
+    // An adopted server stands in for the primary, which then never starts.
+    const adopted = yield* (yield* DesktopBackgroundService.DesktopBackgroundService).adopted;
+    if (Option.isSome(adopted)) {
+      bootstraps.push({
+        id: PRIMARY_LOCAL_ENVIRONMENT_ID,
+        label: "Background service",
+        runningDistro: null,
+        httpBaseUrl: adopted.value.httpBaseUrl.href,
+        wsBaseUrl: toWebSocketBaseUrl(adopted.value.httpBaseUrl),
+        backgroundService: true,
+      });
+    }
     for (const instance of instances) {
       const isPrimary = instance.id === PRIMARY_LOCAL_ENVIRONMENT_ID;
       const config = yield* instance.currentConfig;

@@ -159,6 +159,7 @@ interface BuildCliInput {
   readonly mockUpdates: Option.Option<boolean>;
   readonly mockUpdateServerPort: Option.Option<number>;
   readonly wslRuntime: Option.Option<string>;
+  readonly serviceRuntime: Option.Option<string>;
 }
 
 function detectHostBuildPlatform(hostPlatform: string): typeof BuildPlatform.Type | undefined {
@@ -629,6 +630,18 @@ export class WslRuntimeArchiveMissingError extends Schema.TaggedError<WslRuntime
   }
 }
 
+export class ServiceRuntimeArchiveInvalidError extends Schema.TaggedError<ServiceRuntimeArchiveInvalidError>()(
+  "ServiceRuntimeArchiveInvalidError",
+  {
+    archivePath: Schema.String,
+    reason: Schema.String,
+  },
+) {
+  override get message(): string {
+    return `Background service runtime archive ${this.archivePath} is unusable: ${this.reason}`;
+  }
+}
+
 export class WindowsServerSidecarPackError extends Schema.TaggedError<WindowsServerSidecarPackError>()(
   "WindowsServerSidecarPackError",
   {
@@ -870,6 +883,7 @@ interface ResolvedBuildOptions {
   readonly mockUpdates: boolean;
   readonly mockUpdateServerPort: number | undefined;
   readonly wslRuntime: string | undefined;
+  readonly serviceRuntime: string | undefined;
 }
 
 interface StagePackageJson {
@@ -918,6 +932,7 @@ export const DESKTOP_FILE_EXCLUSIONS = [
   "!apps/desktop/prod-resources/windows-server/**/*",
   "!apps/desktop/prod-resources/wsl-runtime.tar.gz",
   "!apps/desktop/prod-resources/wsl-runtime.tar.gz.sha256",
+  "!apps/desktop/prod-resources/service-runtime.tar.gz",
   "!apps/desktop/gnome-extension",
   "!apps/desktop/gnome-extension/**/*",
 ] as const;
@@ -1024,6 +1039,27 @@ export const WSL_RUNTIME_EXTRA_RESOURCES = [
   WSL_RUNTIME_ARCHIVE_EXTRA_RESOURCE,
   WSL_RUNTIME_ARCHIVE_HASH_EXTRA_RESOURCE,
 ] as const;
+// Linux and macOS builds embed their own platform's CLI release archive
+// verbatim, the same file the install script downloads. The app unpacks it
+// into the T3 home with `t3 service install --runtime-archive`, so the
+// background service runs the app's exact version and architecture without a
+// download, and never from inside the app bundle: an AppImage is only mounted
+// while it runs, and an update replaces it.
+export const SERVICE_RUNTIME_ARCHIVE_NAME = "service-runtime.tar.gz";
+export const SERVICE_RUNTIME_EXTRA_RESOURCES = [
+  {
+    from: `apps/desktop/prod-resources/${SERVICE_RUNTIME_ARCHIVE_NAME}`,
+    to: SERVICE_RUNTIME_ARCHIVE_NAME,
+  },
+] as const;
+
+export const bundlesServiceRuntime = (input: {
+  readonly platform: typeof BuildPlatform.Type;
+  readonly runtimeArchivePath: string | undefined;
+}): boolean =>
+  (input.platform === "linux" || input.platform === "mac") &&
+  input.runtimeArchivePath !== undefined;
+
 export const DESKTOP_EXTRA_RESOURCES = [
   {
     from: "apps/desktop/prod-resources/cursor-sdk",
@@ -1279,6 +1315,9 @@ const BuildEnvConfig = Config.all({
   // by the build_linux_cli CI job. The Windows build embeds it verbatim as the
   // WSL runtime.
   wslRuntime: Config.String("T3CODE_DESKTOP_WSL_RUNTIME").pipe(Config.option),
+  // This platform's CLI release archive, embedded by Linux and macOS builds as
+  // the background service runtime.
+  serviceRuntime: Config.String("T3CODE_DESKTOP_SERVICE_RUNTIME").pipe(Config.option),
 });
 
 const MockUpdateServerPortSchema = Schema.NumberFromString.check(
@@ -1372,6 +1411,8 @@ export const resolveBuildOptions = Effect.fn("resolveBuildOptions")(function* (
 
   const wslRuntime =
     Option.getOrUndefined(input.wslRuntime) ?? Option.getOrUndefined(env.wslRuntime);
+  const serviceRuntime =
+    Option.getOrUndefined(input.serviceRuntime) ?? Option.getOrUndefined(env.serviceRuntime);
 
   return {
     platform,
@@ -1386,6 +1427,7 @@ export const resolveBuildOptions = Effect.fn("resolveBuildOptions")(function* (
     mockUpdates,
     mockUpdateServerPort,
     wslRuntime,
+    serviceRuntime,
   } satisfies ResolvedBuildOptions;
 });
 
@@ -2357,6 +2399,8 @@ export const createBuildConfig = Effect.fn("createBuildConfig")(function* (
   // source file was never written fails the electron-builder step.
   wslRuntimeBundled = false,
   arch?: typeof BuildArch.Type,
+  // Linux and macOS only; same reason as wslRuntimeBundled.
+  serviceRuntimeBundled = false,
 ) {
   const buildConfig: Record<string, unknown> = {
     appId: DESKTOP_APP_ID,
@@ -2386,6 +2430,7 @@ export const createBuildConfig = Effect.fn("createBuildConfig")(function* (
       ...(platform === "linux" ? LINUX_BROWSER_SECRET_EXTRA_RESOURCES : []),
       ...(platform === "win" ? WINDOWS_SERVER_EXTRA_RESOURCES : []),
       ...(platform === "win" && wslRuntimeBundled ? WSL_RUNTIME_EXTRA_RESOURCES : []),
+      ...(platform !== "win" && serviceRuntimeBundled ? SERVICE_RUNTIME_EXTRA_RESOURCES : []),
     ],
   };
   const updateChannel = resolveDesktopUpdateChannel(version);
@@ -2591,6 +2636,58 @@ export const parseWslRuntimeArchiveMembers = (listing: string): ReadonlyArray<st
     .split(/\r?\n/)
     .map((member) => member.replace(/^\.\//, "").replace(/\/$/, ""))
     .filter((member) => member.length > 0);
+
+// Mirrors cliArchiveStem in scripts/build-cli-archive.ts, like the WSL stem.
+export const serviceRuntimeArchiveStem = (
+  version: string,
+  platform: typeof BuildPlatform.Type,
+  arch: typeof BuildArch.Type,
+): string => `t3-${version}-${platform === "mac" ? "darwin" : platform}-${arch}`;
+
+// Copies this platform's CLI release archive into the stage after checking it
+// is the archive for this exact version and architecture: the app hands it to
+// `t3 service install`, and an archive for another architecture would unpack
+// fine and only fail when the service starts on a user's machine.
+export const stageServiceRuntimeArchive = Effect.fn("stageServiceRuntimeArchive")(
+  function* (input: {
+    readonly sourceArchivePath: string;
+    readonly archivePath: string;
+    readonly stem: string;
+  }) {
+    const fs = yield* FileSystem.FileSystem;
+    const path = yield* Path.Path;
+    const invalid = (reason: string) =>
+      new ServiceRuntimeArchiveInvalidError({ archivePath: input.sourceArchivePath, reason });
+    if (!(yield* fs.exists(input.sourceArchivePath).pipe(Effect.orElseSucceed(() => false)))) {
+      return yield* invalid("the file does not exist.");
+    }
+    const listing = yield* spawnAndCollectOutput(
+      ChildProcess.make("tar", ["-tzf", input.sourceArchivePath], {
+        stdin: "ignore",
+        stdout: "pipe",
+        stderr: "pipe",
+      }),
+    );
+    if (listing.exitCode !== 0) {
+      return yield* invalid(`tar could not list it: ${listing.stderr.trim()}`);
+    }
+    const members = parseWslRuntimeArchiveMembers(listing.stdout);
+    const topLevel = new Set(members.map((member) => member.split("/")[0]));
+    if (topLevel.size !== 1 || !topLevel.has(input.stem)) {
+      return yield* invalid(
+        `expected a single top-level directory ${input.stem}, found ${[...topLevel].join(", ") || "nothing"}.`,
+      );
+    }
+    if (!members.includes(`${input.stem}/t3`)) {
+      return yield* invalid(`${input.stem}/t3 is missing.`);
+    }
+    yield* fs.makeDirectory(path.dirname(input.archivePath), { recursive: true });
+    yield* fs.copyFile(input.sourceArchivePath, input.archivePath);
+    yield* Effect.log(
+      `[desktop-artifact] Staged background service runtime ${input.stem} at ${input.archivePath}.`,
+    );
+  },
+);
 
 // Stage and pack the Windows server sidecar: the bundled server plus a hoisted
 // install of only its runtime-external/native dependency closure for win32.
@@ -3393,6 +3490,10 @@ const buildDesktopArtifact = Effect.fn("buildDesktopArtifact")(function* (
       macEntitlementsPath,
       bundlesWslRuntime({ platform: options.platform, runtimeArchivePath: options.wslRuntime }),
       options.arch,
+      bundlesServiceRuntime({
+        platform: options.platform,
+        runtimeArchivePath: options.serviceRuntime,
+      }),
     ),
     dependencies: stageDependencies,
     devDependencies: {
@@ -3463,6 +3564,19 @@ const buildDesktopArtifact = Effect.fn("buildDesktopArtifact")(function* (
       sourceArchivePath: options.wslRuntime,
       archivePath: path.join(stageAppDir, WSL_RUNTIME_ARCHIVE_EXTRA_RESOURCE.from),
       hashPath: path.join(stageAppDir, WSL_RUNTIME_ARCHIVE_HASH_EXTRA_RESOURCE.from),
+    });
+  }
+  if (
+    options.serviceRuntime !== undefined &&
+    bundlesServiceRuntime({
+      platform: options.platform,
+      runtimeArchivePath: options.serviceRuntime,
+    })
+  ) {
+    yield* stageServiceRuntimeArchive({
+      sourceArchivePath: options.serviceRuntime,
+      archivePath: path.join(stageAppDir, SERVICE_RUNTIME_EXTRA_RESOURCES[0].from),
+      stem: serviceRuntimeArchiveStem(appVersion, options.platform, options.arch),
     });
   }
 
@@ -3656,6 +3770,12 @@ const buildDesktopArtifactCli = Command.make("build-desktop-artifact", {
   wslRuntime: Flag.String("wsl-runtime").pipe(
     Flag.withDescription(
       "Path to the Linux CLI release archive (t3-<version>-linux-x64.tar.gz) to embed as the WSL runtime of a Windows build (env: T3CODE_DESKTOP_WSL_RUNTIME).",
+    ),
+    Flag.optional,
+  ),
+  serviceRuntime: Flag.String("service-runtime").pipe(
+    Flag.withDescription(
+      "Path to this build's own CLI release archive (t3-<version>-<platform>-<arch>.tar.gz) to embed as the background service runtime of a Linux or macOS build (env: T3CODE_DESKTOP_SERVICE_RUNTIME).",
     ),
     Flag.optional,
   ),
