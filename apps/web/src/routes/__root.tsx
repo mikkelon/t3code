@@ -21,8 +21,6 @@ import { CommandPalette } from "../components/CommandPalette";
 import { CustomSnoozeDialogHost } from "../components/CustomSnoozeDialog";
 import { ConfirmDialogHost } from "../components/ConfirmDialogHost";
 import { FirstRunGate } from "../components/onboarding/FirstRunGate";
-import { ConnectOnboardingDialog } from "../components/cloud/ConnectOnboardingDialog";
-import { RelayClientInstallDialog } from "../components/cloud/RelayClientInstallDialog";
 import { SshPasswordPromptDialog } from "../components/desktop/SshPasswordPromptDialog";
 import { SnapShotCoordinator } from "../components/desktop/SnapShotCoordinator";
 import { DesktopAppActivationCoordinator } from "../components/desktop/DesktopAppActivationCoordinator";
@@ -63,7 +61,6 @@ import { useUiStateStore } from "../uiStateStore";
 import { syncBrowserChromeTheme } from "../hooks/useTheme";
 import { configureClientTracing } from "../observability/clientTracing";
 import { resolveInitialServerAuthGateState } from "../environments/primary";
-import { hasHostedPairingRequest, isHostedStaticApp } from "../hostedPairing";
 import { isLocalEnvironmentDisabled } from "../localEnvironment";
 import { shellEnvironment } from "../state/shell";
 import { useAtomValue } from "@effect/atom-react";
@@ -86,15 +83,7 @@ import { shouldResumeSnapShotSetupOnStartup } from "../lib/snapShotSetupResume";
 
 export const Route = createRootRoute({
   beforeLoad: async ({ location }) => {
-    if (location.pathname === "/pair" && hasHostedPairingRequest(new URL(window.location.href))) {
-      return {
-        authGateState: {
-          status: "hosted-pairing",
-        } as const,
-      };
-    }
-
-    if (isLocalEnvironmentDisabled() || isHostedStaticApp(new URL(window.location.href))) {
+    if (isLocalEnvironmentDisabled()) {
       return {
         authGateState: {
           status: "hosted-static",
@@ -160,7 +149,7 @@ function RootRouteView() {
     };
   }, [pathname]);
 
-  if (pathname === "/pair" || pathname === "/connect") {
+  if (pathname === "/pair") {
     return (
       <>
         <DocumentTitleSync />
@@ -230,8 +219,6 @@ function RootRouteView() {
           {primaryEnvironmentAuthenticated ? <AuthenticatedTracingBootstrap /> : null}
           {primaryEnvironmentAuthenticated ? <DesktopAppActivationCoordinator /> : null}
           {isElectron ? <RunningThreadKeepAlive /> : null}
-          <RelayClientInstallDialog />
-          <ConnectOnboardingDialog />
           <SshPasswordPromptDialog />
           <SnapShotCoordinator />
           <ThreadNotificationCoordinator />
@@ -245,7 +232,7 @@ function RootRouteView() {
             <EventRouter skipInitialBootstrapNavigation={returningFromWelcomeRef.current} />
           ) : null}
           {primaryEnvironmentAuthenticated ? <ProviderUpdateLaunchNotification /> : null}
-          {/* Hosted Nightly is "hosted-static", not authenticated, and needs it too. */}
+          {/* Desktop with the local environment off is "hosted-static" and needs it too. */}
           <NightlyMobileBetaNotice />
           {appShell}
           {/* Above the router: a theme draft is judged by walking the app, so the
