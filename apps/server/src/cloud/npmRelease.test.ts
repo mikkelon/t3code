@@ -1,6 +1,7 @@
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { expect, it } from "@effect/vitest";
 import { ServerNpmReleaseError } from "@t3tools/contracts";
+import { CLI_RELEASE_REPOSITORY } from "@t3tools/shared/cliRelease";
 import * as HostProcess from "@t3tools/shared/HostProcess";
 import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
@@ -195,4 +196,43 @@ it.effect.each(["--registry=https://example.com", "../other", "other-package@lat
       const service = yield* makeService(() => Effect.die("invalid specs must not spawn npm"));
       expect(Result.isFailure(yield* service.get({ spec }).pipe(Effect.result))).toBe(true);
     }),
+);
+
+it.effect("reads releases from the fork's GitHub Releases, which have no nightly track", () =>
+  Effect.gen(function* () {
+    const urls: string[] = [];
+    const service = yield* NpmRelease.makeForkReleases().pipe(
+      Effect.provideService(
+        HttpClient.HttpClient,
+        HttpClient.make((request) => {
+          urls.push(request.url);
+          const tag = request.url.endsWith("/latest")
+            ? "v0.1.6-mk.1"
+            : request.url.endsWith("/v0.0.46-mk.15")
+              ? "v0.0.46-mk.15"
+              : request.url.endsWith("/v0.0.46-mk.16")
+                ? "v0.0.46-mk.17"
+                : undefined;
+          const response =
+            tag === undefined
+              ? new Response("{}", { status: 404 })
+              : Response.json({ tag_name: tag });
+          return Effect.succeed(HttpClientResponse.fromWeb(request, response));
+        }),
+      ),
+    );
+    expect(yield* service.get({ spec: "latest" })).toEqual({ version: "0.1.6-mk.1" });
+    expect(yield* service.get({ spec: "0.0.46-mk.15" })).toEqual({ version: "0.0.46-mk.15" });
+    expect(yield* service.get({ spec: "0.0.46-mk.14" })).toBeNull();
+    expect(yield* service.get({ spec: "nightly" })).toBeNull();
+    const mismatch = yield* service.get({ spec: "0.0.46-mk.16" }).pipe(Effect.result);
+    expect(Result.isFailure(mismatch)).toBe(true);
+    const api = `https://api.github.com/repos/${CLI_RELEASE_REPOSITORY}/releases`;
+    expect(urls).toEqual([
+      `${api}/latest`,
+      `${api}/tags/v0.0.46-mk.15`,
+      `${api}/tags/v0.0.46-mk.14`,
+      `${api}/tags/v0.0.46-mk.16`,
+    ]);
+  }),
 );
