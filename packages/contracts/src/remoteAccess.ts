@@ -66,3 +66,39 @@ export const AdvertisedEndpoint = Schema.Struct({
   description: Schema.optional(TrimmedNonEmptyString),
 });
 export type AdvertisedEndpoint = typeof AdvertisedEndpoint.Type;
+
+/** HTTPS ports Tailscale Serve offers for a tailnet endpoint. */
+export const TAILSCALE_SERVE_HTTPS_PORTS = [443, 8443, 10000] as const;
+export const TailscaleServeHttpsPort = Schema.Literals(TAILSCALE_SERVE_HTTPS_PORTS);
+export type TailscaleServeHttpsPort = typeof TailscaleServeHttpsPort.Type;
+
+export const TailscaleServeInput = Schema.Struct({
+  enabled: Schema.Boolean,
+  port: TailscaleServeHttpsPort,
+});
+export type TailscaleServeInput = typeof TailscaleServeInput.Type;
+
+export const TailscaleServeState = Schema.Struct({
+  enabled: Schema.Boolean,
+  port: Schema.Int,
+  /**
+   * `settings`: stored in this server's settings and changed with
+   * `server.setTailscaleServe`. `launch`: fixed by how the server was started
+   * (`--tailscale-serve`, or a desktop app's own backend), so not changeable here.
+   */
+  source: Schema.Literals(["settings", "launch"]),
+  /** The MagicDNS HTTPS endpoint; null without a running, MagicDNS-enabled Tailscale. */
+  endpoint: Schema.NullOr(AdvertisedEndpoint),
+  /** Why the endpoint is not serving this environment, when it should be. */
+  problem: Schema.NullOr(Schema.String),
+});
+export type TailscaleServeState = typeof TailscaleServeState.Type;
+
+export class TailscaleServeError extends Schema.TaggedError<TailscaleServeError>()(
+  "TailscaleServeError",
+  { detail: Schema.String },
+) {
+  override get message(): string {
+    return this.detail;
+  }
+}
