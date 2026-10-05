@@ -10,9 +10,11 @@ import * as Semaphore from "effect/Semaphore";
 import { HttpClient, HttpClientRequest, HttpClientResponse } from "effect/http";
 
 import {
+  type CliArchivePlatformKey,
   CLI_RELEASE_CHECKSUMS_FILE,
   cliArchiveFileName,
   cliArchivePlatformKey,
+  cliArchiveStem,
   cliArchiveTarCommand,
   cliReleaseDownloadBaseUrl,
   parseChecksums,
@@ -125,6 +127,12 @@ interface PinnedRuntimeInstallInput {
   readonly arch: string;
   readonly httpClient: HttpClient.HttpClient;
   readonly releaseBaseUrl?: string | undefined;
+  /**
+   * A release archive already on this machine, such as the one the desktop
+   * app ships, unpacked instead of downloading. It must hold this version for
+   * this platform and architecture.
+   */
+  readonly localArchive?: string | undefined;
   readonly onProgress?: (progress: PinnedRuntimeProgress) => void;
 }
 
@@ -175,23 +183,101 @@ const fetchReleaseAsset = Effect.fn("cloud.pinned_runtime.fetch_release_asset")(
   );
 });
 
+const runTar = (
+  input: PinnedRuntimeInstallInput,
+  step: string,
+  args: ReadonlyArray<string>,
+): Effect.Effect<ProcessRunner.ProcessRunOutput, PinnedRuntimeInstallError> =>
+  input.runner
+    .run({
+      command: cliArchiveTarCommand(input.platform, process.env),
+      args,
+      timeout: PINNED_RUNTIME_INSTALL_TIMEOUT,
+    })
+    .pipe(
+      Effect.mapError((cause) => new PinnedRuntimeInstallError({ step, cause })),
+      Effect.filterOrFail(
+        (result) => result.code === 0,
+        (result) =>
+          new PinnedRuntimeInstallError({
+            step,
+            exitCode: Number(result.code),
+            stdoutLength: result.stdout.length,
+            stderrLength: result.stderr.length,
+          }),
+      ),
+    );
+
 /**
- * Downloads the release archive for this platform, verifies it against the
- * release's checksum file, and unpacks it so the executable sits directly in
- * the staging directory. Only `tar` is required on the host; every supported
- * OS ships one that reads gzip and zip.
+ * A local archive is not checksummed against a release, so its contents are
+ * checked instead: every entry must sit under the directory named for this
+ * version, platform and architecture. An archive for another architecture
+ * would otherwise unpack fine and only fail when the service starts.
+ */
+const checkLocalArchive = Effect.fn("cloud.pinned_runtime.check_local_archive")(function* (
+  input: PinnedRuntimeInstallInput,
+  archivePath: string,
+  expectedStem: string,
+) {
+  const listing = yield* runTar(input, "listing the t3 runtime archive", ["-tf", archivePath]);
+  const roots = new Set(
+    listing.stdout
+      .split(/\r?\n/)
+      .map((entry) => entry.trim().replace(/^\.\//, "").split("/")[0] ?? "")
+      .filter((root) => root.length > 0),
+  );
+  if (roots.size !== 1 || !roots.has(expectedStem)) {
+    return yield* new PinnedRuntimeInstallError({
+      step: `checking that ${archivePath} holds ${expectedStem} (found ${[...roots].join(", ") || "nothing"})`,
+    });
+  }
+});
+
+/**
+ * Downloads the release archive for this platform and verifies it against
+ * the release's checksum file, or takes a local archive, then unpacks it so
+ * the executable sits directly in the staging directory. Only `tar` is
+ * required on the host; every supported OS ships one that reads gzip and zip.
  */
 const installFromArchive = Effect.fn("cloud.pinned_runtime.install_archive")(function* (
   input: PinnedRuntimeInstallInput,
   stagingDir: string,
 ) {
-  const { fs, path } = input;
   const platformKey = cliArchivePlatformKey(input.platform, input.arch);
   if (platformKey === undefined) {
     return yield* new PinnedRuntimeInstallError({
       step: `selecting a t3 release archive for ${input.platform}-${input.arch}`,
     });
   }
+  const archivePath =
+    input.localArchive === undefined
+      ? yield* downloadArchive(input, stagingDir, platformKey)
+      : input.localArchive;
+  if (input.localArchive !== undefined) {
+    yield* checkLocalArchive(input, archivePath, cliArchiveStem(input.version, platformKey));
+  }
+  input.onProgress?.({ stage: "extract" });
+  // The archive wraps everything in one directory named after its stem;
+  // strip it so the executable lands at <versionDir>/t3.
+  yield* runTar(input, "extracting the t3 release archive", [
+    "-xf",
+    archivePath,
+    "-C",
+    stagingDir,
+    "--strip-components=1",
+  ]);
+  if (input.localArchive === undefined) {
+    yield* input.fs.remove(archivePath, { force: true }).pipe(Effect.ignore);
+  }
+});
+
+/** Downloads and verifies the release archive into the staging directory. */
+const downloadArchive = Effect.fn("cloud.pinned_runtime.download_archive")(function* (
+  input: PinnedRuntimeInstallInput,
+  stagingDir: string,
+  platformKey: CliArchivePlatformKey,
+) {
+  const { fs, path } = input;
   const httpClient = input.httpClient;
   const baseUrl = cliReleaseDownloadBaseUrl(input.version, input.releaseBaseUrl);
   const fileName = cliArchiveFileName(input.version, platformKey);
@@ -238,30 +324,7 @@ const installFromArchive = Effect.fn("cloud.pinned_runtime.install_archive")(fun
         (cause) => new PinnedRuntimeInstallError({ step: "writing the t3 release archive", cause }),
       ),
     );
-  input.onProgress?.({ stage: "extract" });
-  const extractStep = "extracting the t3 release archive";
-  // The archive wraps everything in one directory named after its stem;
-  // strip it so the executable lands at <versionDir>/t3.
-  yield* input.runner
-    .run({
-      command: cliArchiveTarCommand(input.platform, process.env),
-      args: ["-xf", archivePath, "-C", stagingDir, "--strip-components=1"],
-      timeout: PINNED_RUNTIME_INSTALL_TIMEOUT,
-    })
-    .pipe(
-      Effect.mapError((cause) => new PinnedRuntimeInstallError({ step: extractStep, cause })),
-      Effect.filterOrFail(
-        (result) => result.code === 0,
-        (result) =>
-          new PinnedRuntimeInstallError({
-            step: extractStep,
-            exitCode: Number(result.code),
-            stdoutLength: result.stdout.length,
-            stderrLength: result.stderr.length,
-          }),
-      ),
-    );
-  yield* fs.remove(archivePath, { force: true }).pipe(Effect.ignore);
+  return archivePath;
 });
 
 const installPinnedRuntime = Effect.fn("cloud.pinned_runtime.ensure_installed")(function* (

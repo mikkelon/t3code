@@ -246,6 +246,29 @@ it.layer(NodeServices.layer)("DesktopCliCommand", (it) => {
     }).pipe(Effect.scoped),
   );
 
+  it.effect("stays out of the way of the background service's launcher", () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const home = yield* fs.makeTempDirectoryScoped();
+      const command = yield* commandIn({ home });
+      const runtime = path.join(home, ".t3", "runtime", "versions", "0.0.47", "t3");
+      yield* fs.makeDirectory(path.dirname(runtime), { recursive: true });
+      yield* fs.writeFileString(runtime, "runtime\n");
+      const link = path.join(home, ".local", "bin", "t3");
+      yield* fs.makeDirectory(path.dirname(link), { recursive: true });
+      yield* fs.symlink(runtime, link);
+
+      expect(yield* command.state).toEqual({
+        supported: false,
+        installedPath: null,
+        onPath: false,
+      });
+      yield* command.uninstall;
+      expect(yield* fs.readLink(link)).toBe(runtime);
+    }).pipe(Effect.scoped),
+  );
+
   it.effect("offers nothing for a development build", () =>
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem;

@@ -42,6 +42,7 @@ import * as DesktopCliCommand from "./app/DesktopCliCommand.ts";
 import * as DesktopApplicationMenu from "./window/DesktopApplicationMenu.ts";
 import * as DesktopAssets from "./app/DesktopAssets.ts";
 import * as DesktopBackendConfiguration from "./backend/DesktopBackendConfiguration.ts";
+import * as DesktopBackgroundService from "./backend/DesktopBackgroundService.ts";
 import * as DesktopBackendPool from "./backend/DesktopBackendPool.ts";
 import * as DesktopLocalEnvironmentAuth from "./backend/DesktopLocalEnvironmentAuth.ts";
 import * as DesktopNetworkInterfaces from "./backend/DesktopNetworkInterfaces.ts";
@@ -205,7 +206,12 @@ const layerDesktopWslBackend = DesktopWslBackend.layer.pipe(
   Layer.provideMerge(layerDesktopBackend),
 );
 
+const layerDesktopBackgroundService = DesktopBackgroundService.layer.pipe(
+  Layer.provideMerge(layerDesktopFoundation),
+);
+
 const layerDesktopLocalEnvironmentAuth = DesktopLocalEnvironmentAuth.layer.pipe(
+  Layer.provideMerge(layerDesktopBackgroundService),
   Layer.provideMerge(layerDesktopBackend),
 );
 

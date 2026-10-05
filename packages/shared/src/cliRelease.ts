@@ -54,8 +54,13 @@ export function cliArchiveTarCommand(
   return `${systemRoot}\\System32\\tar.exe`;
 }
 
+/** The single top-level directory every file in an archive sits under. */
+export function cliArchiveStem(version: string, platformKey: CliArchivePlatformKey): string {
+  return `t3-${version}-${platformKey}`;
+}
+
 export function cliArchiveFileName(version: string, platformKey: CliArchivePlatformKey): string {
-  return `t3-${version}-${platformKey}.${platformKey.startsWith("win32") ? "zip" : "tar.gz"}`;
+  return `${cliArchiveStem(version, platformKey)}.${platformKey.startsWith("win32") ? "zip" : "tar.gz"}`;
 }
 
 const CLI_RELEASE_DEFAULT_BASE_URL = `https://github.com/${CLI_RELEASE_REPOSITORY}/releases/download`;

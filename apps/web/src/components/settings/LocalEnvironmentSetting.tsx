@@ -1,6 +1,9 @@
 import { useState } from "react";
 
-import { isLocalEnvironmentDisabled } from "../../localEnvironment";
+import {
+  isLocalEnvironmentBackgroundService,
+  isLocalEnvironmentDisabled,
+} from "../../localEnvironment";
 import {
   AlertDialog,
   AlertDialogClose,
@@ -21,6 +24,7 @@ import { searchableSetting } from "./settingsSearch";
 export function LocalEnvironmentSetting() {
   const setEnabled = window.desktopBridge?.setLocalEnvironmentEnabled;
   const [enabled] = useState(() => !isLocalEnvironmentDisabled());
+  const [backgroundService] = useState(isLocalEnvironmentBackgroundService);
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [isUpdating, setIsUpdating] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -43,7 +47,9 @@ export function LocalEnvironmentSetting() {
         {...searchableSetting("local-environment")}
         description={
           enabled
-            ? "Run agents on this computer. Turn off to use T3 Code only with remote environments."
+            ? backgroundService
+              ? "Run agents on this computer through its background service. Turn off to use T3 Code only with remote environments."
+              : "Run agents on this computer. Turn off to use T3 Code only with remote environments."
             : "Turned off. Agents only run in remote environments."
         }
         control={
@@ -70,7 +76,9 @@ export function LocalEnvironmentSetting() {
             </AlertDialogTitle>
             <AlertDialogDescription>
               {enabled
-                ? "T3 Code will restart without running a server on this computer. Any agents and terminals running here will stop, and other devices will no longer be able to connect to this computer. Your projects, history, and remote environments are unaffected."
+                ? backgroundService
+                  ? "T3 Code will restart without connecting to this computer's background service. The service and its agents keep running, and other devices can still connect to it. Your projects, history, and remote environments are unaffected."
+                  : "T3 Code will restart without running a server on this computer. Any agents and terminals running here will stop, and other devices will no longer be able to connect to this computer. Your projects, history, and remote environments are unaffected."
                 : "T3 Code will restart and start running a server on this computer again."}
             </AlertDialogDescription>
           </AlertDialogHeader>
