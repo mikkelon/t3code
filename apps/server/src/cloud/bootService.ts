@@ -16,6 +16,13 @@ import * as Path from "effect/Path";
 import { HttpClient } from "effect/http";
 import * as Schema from "effect/Schema";
 
+import {
+  BOOT_SERVICE_LAUNCHD_LABEL,
+  BOOT_SERVICE_PLIST_FILE,
+  BOOT_SERVICE_UNIT_FILE,
+  bootServiceBaseDirOf,
+  bootServiceUnitPath,
+} from "@t3tools/shared/bootServiceUnit";
 import { CLI_RELEASE_BASE_URL_ENV } from "@t3tools/shared/cliRelease";
 
 import * as ProcessRunner from "../processRunner.ts";
@@ -36,12 +43,7 @@ import {
   type ServiceState,
 } from "./serviceProtocol.ts";
 
-const BOOT_SERVICE_NAME = "t3code";
-const BOOT_SERVICE_UNIT_FILE = `${BOOT_SERVICE_NAME}.service`;
-// `.service` suffix keeps the label distinct from the desktop app's bundle id
-// (com.t3tools.t3code), so launchd and TCC records never collide.
-const BOOT_SERVICE_LAUNCHD_LABEL = "com.t3tools.t3code.service";
-const BOOT_SERVICE_PLIST_FILE = `${BOOT_SERVICE_LAUNCHD_LABEL}.plist`;
+export { bootServiceBaseDirOf };
 const BOOT_SERVICE_UNIT_ENV = "T3_BOOT_SERVICE_UNIT";
 /** File in the logs dir that receives the service's stdout and stderr. `t3 triage` points agents at it. */
 export const BOOT_SERVICE_LOG_FILE = "boot-service.log";
@@ -56,28 +58,6 @@ function quoteSystemdValue(value: string): string {
   return /[\s"'\\]/.test(escaped)
     ? `"${escaped.replaceAll("\\", "\\\\").replaceAll('"', '\\"')}"`
     : escaped;
-}
-
-/**
- * Reads `T3CODE_HOME` back out of a rendered unit or plist. Only values this
- * file writes are expected, so a quoted systemd value is unquoted and
- * unescaped the same way `quoteSystemdValue` produced it.
- */
-export function bootServiceBaseDirOf(contents: string): string | undefined {
-  const systemd = /^Environment=T3CODE_HOME=(.*)$/m.exec(contents)?.[1];
-  if (systemd !== undefined) {
-    const raw = systemd.trim();
-    const unquoted =
-      raw.startsWith('"') && raw.endsWith('"')
-        ? raw.slice(1, -1).replaceAll('\\"', '"').replaceAll("\\\\", "\\")
-        : raw;
-    return unquoted.replaceAll("%%", "%");
-  }
-  const plist = /<key>T3CODE_HOME<\/key>\s*<string>([^<]*)<\/string>/.exec(contents)?.[1];
-  if (plist !== undefined) {
-    return plist.replaceAll("&lt;", "<").replaceAll("&gt;", ">").replaceAll("&amp;", "&");
-  }
-  return undefined;
 }
 
 export interface BootServicePlan {
@@ -228,6 +208,8 @@ export interface BootServiceManager {
   readonly activate: ReadonlyArray<BootServiceStep>;
   /** Best-effort recovery after a failed repair of an installed service. */
   readonly restart: ReadonlyArray<BootServiceStep>;
+  /** Start an installed service without restarting it when it already runs. */
+  readonly start: ReadonlyArray<BootServiceStep>;
   /** Uninstall, before the unit file is removed. */
   readonly deactivate: ReadonlyArray<BootServiceStep>;
   /** Uninstall, after the unit file is removed. */
@@ -238,13 +220,10 @@ function systemdManager(input: {
   readonly path: Path.Path;
   readonly homeDir: string;
 }): BootServiceManager {
-  const unitPath = input.path.join(
-    input.homeDir,
-    ".config",
-    "systemd",
-    "user",
-    BOOT_SERVICE_UNIT_FILE,
-  );
+  // selectBootServiceManager only builds a manager for a non-empty home.
+  const unitPath =
+    bootServiceUnitPath({ platform: "linux", homeDir: input.homeDir, joinPath: input.path.join }) ??
+    "";
   return {
     kind: "systemd",
     unitPath,
@@ -282,6 +261,24 @@ function systemdManager(input: {
         args: ["--user", "restart", BOOT_SERVICE_UNIT_FILE],
       },
     ],
+    // `install --no-start` leaves a fresh unit unloaded and disabled.
+    start: [
+      {
+        step: "reloading systemd user units",
+        command: "systemctl",
+        args: ["--user", "daemon-reload"],
+      },
+      {
+        step: "enabling the service",
+        command: "systemctl",
+        args: ["--user", "enable", BOOT_SERVICE_UNIT_FILE],
+      },
+      {
+        step: "starting the service",
+        command: "systemctl",
+        args: ["--user", "start", BOOT_SERVICE_UNIT_FILE],
+      },
+    ],
     deactivate: [
       {
         step: "stopping the service",
@@ -306,12 +303,13 @@ function launchdManager(input: {
   readonly uid: number;
   readonly environmentPath: string;
 }): BootServiceManager {
-  const unitPath = input.path.join(
-    input.homeDir,
-    "Library",
-    "LaunchAgents",
-    BOOT_SERVICE_PLIST_FILE,
-  );
+  // selectBootServiceManager only builds a manager for a non-empty home.
+  const unitPath =
+    bootServiceUnitPath({
+      platform: "darwin",
+      homeDir: input.homeDir,
+      joinPath: input.path.join,
+    }) ?? "";
   const domainTarget = `gui/${input.uid}`;
   const serviceTarget = `${domainTarget}/${BOOT_SERVICE_LAUNCHD_LABEL}`;
   // bootout/enable are optional: they fail on not-loaded states that are fine
@@ -362,6 +360,28 @@ function launchdManager(input: {
         step: "restarting the service after a failed update",
         command: "launchctl",
         args: ["bootstrap", domainTarget, unitPath],
+      },
+    ],
+    // bootstrap loads and starts an unloaded job and fails harmlessly on a
+    // loaded one; kickstart without -k then starts a loaded job that is not
+    // running and leaves a running one alone.
+    start: [
+      {
+        step: "enabling the launch agent",
+        command: "launchctl",
+        args: ["enable", serviceTarget],
+        optional: true,
+      },
+      {
+        step: "loading the launch agent",
+        command: "launchctl",
+        args: ["bootstrap", domainTarget, unitPath],
+        optional: true,
+      },
+      {
+        step: "starting the service",
+        command: "launchctl",
+        args: ["kickstart", serviceTarget],
       },
     ],
     // No `launchctl disable` here: a persisted override would sabotage a
@@ -543,6 +563,12 @@ export class BootService extends Context.Service<
      * restarted.
      */
     readonly restart: Effect.Effect<boolean, BootServiceError>;
+    /**
+     * Start the installed service if it is not running; a running service is
+     * left alone. Same base-dir guard as restart. Resolves false when nothing
+     * is installed for this base dir.
+     */
+    readonly start: Effect.Effect<boolean, BootServiceError>;
     readonly uninstall: Effect.Effect<boolean, BootServiceError>;
     readonly status: Effect.Effect<BootServiceStatus, BootServiceError>;
   }
@@ -901,17 +927,19 @@ export const make = Effect.fn("cloud.boot_service.make")(function* (input: {
     return plan;
   });
 
-  const restart: BootService["Service"]["restart"] = Effect.gen(function* () {
-    const manager = yield* requireManager;
+  const servesThisBaseDir = Effect.gen(function* () {
     const unit = yield* fs.readFileString(unitPath).pipe(Effect.option);
     if (Option.isNone(unit)) return false;
     const installedBaseDir = bootServiceBaseDirOf(unit.value);
-    if (
-      installedBaseDir === undefined ||
-      path.resolve(installedBaseDir) !== path.resolve(input.baseDir)
-    ) {
-      return false;
-    }
+    return (
+      installedBaseDir !== undefined &&
+      path.resolve(installedBaseDir) === path.resolve(input.baseDir)
+    );
+  });
+
+  const restart: BootService["Service"]["restart"] = Effect.gen(function* () {
+    const manager = yield* requireManager;
+    if (!(yield* servesThisBaseDir)) return false;
     yield* runSteps(manager.stop);
     yield* runSteps(manager.activate).pipe(
       // Same recovery as a failed repair: a service that was running should
@@ -926,6 +954,13 @@ export const make = Effect.fn("cloud.boot_service.make")(function* (input: {
     ),
     Effect.withSpan("cloud.boot_service.restart"),
   );
+
+  const start: BootService["Service"]["start"] = Effect.gen(function* () {
+    const manager = yield* requireManager;
+    if (!(yield* servesThisBaseDir)) return false;
+    yield* runSteps(manager.start);
+    return true;
+  }).pipe(Effect.withSpan("cloud.boot_service.start"));
 
   const uninstall: BootService["Service"]["uninstall"] = Effect.gen(function* () {
     const manager = yield* requireManager;
@@ -990,7 +1025,7 @@ export const make = Effect.fn("cloud.boot_service.make")(function* (input: {
     Effect.withSpan("cloud.boot_service.status"),
   );
 
-  return BootService.of({ install, restart, uninstall, status });
+  return BootService.of({ install, restart, start, uninstall, status });
 });
 
 export const layer = (input: {
