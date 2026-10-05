@@ -178,6 +178,15 @@ const encodeSessionFile = Schema.encodeSync(Schema.fromJsonString(SessionFile));
 const IssuedSession = Schema.Struct({ token: Schema.String });
 const decodeIssuedSession = Schema.decodeUnknownOption(Schema.fromJsonString(IssuedSession));
 
+/** An unreadable origin counts as unchanged; the next probe decides. */
+function namesSameOrigin(raw: string, current: URL): boolean {
+  try {
+    return new URL(raw).href === current.href;
+  } catch {
+    return true;
+  }
+}
+
 /** The JSON object a CLI printed, ignoring any noise around it. */
 export function extractJsonObject(output: string): string | undefined {
   const start = output.indexOf("{");
@@ -462,6 +471,17 @@ export const make = Effect.gen(function* () {
   // The renderer reconnects on its own when the server restarts on the same
   // origin. A restart on another port only shows up in the runtime file.
   const followServer = Effect.gen(function* () {
+    const origin = yield* DesktopLocalServerDiscovery.readRuntimeOrigin(environment.stateDir).pipe(
+      Effect.provide(context),
+    );
+    const current = yield* Ref.get(adoptedRef);
+    if (
+      Option.isNone(origin) ||
+      Option.isNone(current) ||
+      namesSameOrigin(origin.value, current.value.httpBaseUrl)
+    ) {
+      return;
+    }
     const live = yield* probeLive;
     if (Option.isNone(live)) return;
     yield* Ref.update(adoptedRef, (current) =>

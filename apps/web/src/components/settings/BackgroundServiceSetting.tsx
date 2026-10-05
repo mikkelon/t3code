@@ -85,14 +85,22 @@ export function BackgroundServiceSetting() {
     <>
       <SettingsRow
         {...searchableSetting("background-service")}
-        title={state.adopted ? "Background service" : searchableSetting("background-service").title}
+        title={
+          state.adopted
+            ? state.installed
+              ? "Background service"
+              : "Local server"
+            : searchableSetting("background-service").title
+        }
         description={
           state.adopted
-            ? "Agents on this computer run in the background service and keep running when you close T3 Code."
+            ? state.installed
+              ? "Agents on this computer run in the background service and keep running when you close T3 Code."
+              : "A T3 server started outside the app runs agents on this computer. Closing T3 Code leaves it running."
             : "Agents stop when T3 Code closes. Run them in a background service that starts with this computer instead."
         }
         control={
-          state.supported ? (
+          state.supported && (state.installed || !state.adopted) ? (
             <Button
               variant="outline"
               size="sm"
