@@ -15,6 +15,7 @@ import * as Semaphore from "effect/Semaphore";
 import * as HttpClient from "effect/http/HttpClient";
 
 import * as DesktopBackendPool from "./DesktopBackendPool.ts";
+import * as DesktopBackgroundService from "./DesktopBackgroundService.ts";
 
 const BOOTSTRAP_TRANSIENT_RETRY_TIMEOUT = Duration.seconds(15);
 const BOOTSTRAP_TRANSIENT_RETRY_INTERVAL = Duration.millis(500);
@@ -66,6 +67,7 @@ export class DesktopLocalEnvironmentAuth extends Context.Service<
 /** @public */
 export const make = Effect.gen(function* () {
   const pool = yield* DesktopBackendPool.DesktopBackendPool;
+  const backgroundService = yield* DesktopBackgroundService.DesktopBackgroundService;
   const httpClient = yield* HttpClient.HttpClient;
   const tokenRef = yield* Ref.make(Option.none<string>());
   const mutex = yield* Semaphore.make(1);
@@ -73,6 +75,13 @@ export const make = Effect.gen(function* () {
   const getBearerToken = mutex
     .withPermits(1)(
       Effect.gen(function* () {
+        if (Option.isSome(yield* backgroundService.adopted)) {
+          return yield* backgroundService.getBearerToken.pipe(
+            Effect.mapError(
+              (cause) => new DesktopLocalEnvironmentAuthSessionBootstrapError({ cause }),
+            ),
+          );
+        }
         const cached = yield* Ref.get(tokenRef);
         if (Option.isSome(cached)) {
           return cached.value;
