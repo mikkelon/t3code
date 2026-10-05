@@ -67,6 +67,8 @@ const RPC_AGGREGATES = {
   [WS_METHODS.serverSetAcpRegistryProvider]: "server",
   [WS_METHODS.serverDisableAcpRegistryProvider]: "server",
   [WS_METHODS.serverLogoutAcpRegistry]: "server",
+  [WS_METHODS.serverGetTailscaleServe]: "server",
+  [WS_METHODS.serverSetTailscaleServe]: "server",
   [WS_METHODS.serverDiscoverSourceControl]: "server",
   [WS_METHODS.serverGetTraceDiagnostics]: "server",
   [WS_METHODS.serverGetProcessDiagnostics]: "server",
