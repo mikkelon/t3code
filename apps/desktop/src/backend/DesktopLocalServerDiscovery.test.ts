@@ -62,29 +62,41 @@ describe("decideLocalServer", () => {
     environmentId: "env-home",
     serverVersion: "1.2.3",
     serviceManaged: true,
+    startedAt: undefined,
   };
 
   it("adopts a live owner whether or not the service is installed", () => {
-    assert.deepEqual(decideLocalServer({ serviceInstalled: true, live: Option.some(live) }), {
-      _tag: "Adopt",
-      server: live,
-    });
-    assert.deepEqual(decideLocalServer({ serviceInstalled: false, live: Option.some(live) }), {
-      _tag: "Adopt",
-      server: live,
-    });
+    for (const serviceInstalled of [true, false]) {
+      for (const autoInstall of [true, false]) {
+        assert.deepEqual(
+          decideLocalServer({ serviceInstalled, live: Option.some(live), autoInstall }),
+          { _tag: "Adopt", server: live },
+        );
+      }
+    }
   });
 
-  it("starts an installed service that is stopped instead of embedding", () => {
-    assert.deepEqual(decideLocalServer({ serviceInstalled: true, live: Option.none() }), {
-      _tag: "StartService",
-    });
+  it("starts an installed service that is stopped, even after an opt-out", () => {
+    for (const autoInstall of [true, false]) {
+      assert.deepEqual(
+        decideLocalServer({ serviceInstalled: true, live: Option.none(), autoInstall }),
+        { _tag: "StartService" },
+      );
+    }
   });
 
-  it("embeds only when nothing is installed or running", () => {
-    assert.deepEqual(decideLocalServer({ serviceInstalled: false, live: Option.none() }), {
-      _tag: "Embed",
-    });
+  it("installs the service when nothing owns the home and the app may", () => {
+    assert.deepEqual(
+      decideLocalServer({ serviceInstalled: false, live: Option.none(), autoInstall: true }),
+      { _tag: "InstallService" },
+    );
+  });
+
+  it("embeds only when nothing is installed or running and the app may not install", () => {
+    assert.deepEqual(
+      decideLocalServer({ serviceInstalled: false, live: Option.none(), autoInstall: false }),
+      { _tag: "Embed" },
+    );
   });
 });
 
@@ -152,6 +164,7 @@ describe("probeLiveLocalServer", () => {
             environmentId: "env-home",
             serverVersion: "1.2.3",
             serviceManaged: true,
+            startedAt: "2026-10-05T00:00:00.000Z",
           }),
         );
         assert.deepEqual(requests, ["http://127.0.0.1:3773/.well-known/t3/environment"]);

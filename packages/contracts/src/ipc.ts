@@ -382,31 +382,41 @@ export const DesktopEnvironmentBootstrapSchema = Schema.Struct({
   backgroundService: Schema.optionalKey(Schema.Boolean),
 });
 
+export const DesktopBackgroundServiceUpdateSchema = Schema.Union([
+  Schema.Struct({ status: Schema.Literal("none") }),
+  // The app put its own, newer server next to the service's. The service
+  // switches to it through a server update once its agents are idle.
+  Schema.Struct({ status: Schema.Literal("ready"), targetVersion: Schema.String }),
+  Schema.Struct({
+    status: Schema.Literal("failed"),
+    targetVersion: Schema.String,
+    message: Schema.String,
+  }),
+]);
+export type DesktopBackgroundServiceUpdate = typeof DesktopBackgroundServiceUpdateSchema.Type;
+
 export const DesktopBackgroundServiceStateSchema = Schema.Struct({
-  // Linux or macOS with a published runtime, outside development.
+  // The app installs, updates and removes the service: a packaged Linux or
+  // macOS build that ships a service runtime.
   supported: Schema.Boolean,
   // Installed for this app's T3 home.
   installed: Schema.Boolean,
-  // The local environment is the background service instead of a backend
-  // the app runs itself.
+  // The local environment is a server the app adopted instead of a backend
+  // it runs itself.
   adopted: Schema.Boolean,
+  // "Don't run agents in the background" is on.
+  disabled: Schema.Boolean,
+  // The adopted server, as it answers now.
+  serverVersion: Schema.NullOr(Schema.String),
+  startedAt: Schema.NullOr(Schema.String),
+  update: DesktopBackgroundServiceUpdateSchema,
+  // This launch could not set up the service and runs the app's own backend.
+  error: Schema.NullOr(Schema.String),
+  // Linux without lingering: the service stops when the user logs out. This
+  // command, run once, keeps it running.
+  lingerCommand: Schema.NullOr(Schema.String),
 });
 export type DesktopBackgroundServiceState = typeof DesktopBackgroundServiceStateSchema.Type;
-
-export const DesktopBackgroundServiceInstallResultSchema = Schema.Union([
-  // Installed; the app restarts and hands over to the service.
-  Schema.Struct({ _tag: Schema.Literal("Installed") }),
-  // Lingering needs administrator rights. Run `command`, then retry.
-  Schema.Struct({ _tag: Schema.Literal("NeedsLinger"), command: Schema.String }),
-]);
-export type DesktopBackgroundServiceInstallResult =
-  typeof DesktopBackgroundServiceInstallResultSchema.Type;
-
-export const DesktopAgentActivitySchema = Schema.Struct({
-  running: Schema.Int,
-  continuesAfterRestart: Schema.Boolean,
-});
-export type DesktopAgentActivity = typeof DesktopAgentActivitySchema.Type;
 
 export const DesktopSshEnvironmentTargetSchema = Schema.Struct({
   alias: Schema.String,
@@ -1175,12 +1185,13 @@ export interface DesktopBridge {
   setLocalEnvironmentEnabled?: (enabled: boolean) => Promise<void>;
   getLocalEnvironmentBearerToken: () => Promise<string>;
   getBackgroundServiceState?: () => Promise<DesktopBackgroundServiceState>;
-  // On success the app restarts on the background service.
-  installBackgroundService?: () => Promise<DesktopBackgroundServiceInstallResult>;
-  // The app restarts on its own backend; projects and threads are kept.
-  uninstallBackgroundService?: () => Promise<void>;
-  // Running turns on the primary environment, for the quit prompt.
-  reportAgentActivity?: (activity: DesktopAgentActivity) => Promise<void>;
+  // True once, after the launch that installed the service.
+  takeBackgroundServiceInstallNotice?: () => Promise<boolean>;
+  restartBackgroundService?: () => Promise<void>;
+  openBackgroundServiceLogs?: () => Promise<void>;
+  // Removes or reinstates the service, then restarts the app on its own
+  // backend or on the service. Projects and threads are kept.
+  setBackgroundServiceEnabled?: (enabled: boolean) => Promise<void>;
   getClientSettings: () => Promise<ClientSettings | null>;
   setClientSettings: (settings: ClientSettings) => Promise<void>;
   getConnectionCatalog?: () => Promise<string | null>;

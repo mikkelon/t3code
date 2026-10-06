@@ -804,11 +804,11 @@ export const SETTINGS_SEARCH_ITEMS = [
   },
   {
     id: "background-service",
-    title: "Keep agents running in the background",
+    title: "Background service",
     to: "/settings/connections",
     targetId: "connections-environment",
     searchTerms: [
-      "background service daemon systemd launchd keep agents running close quit t3 service",
+      "background service daemon systemd launchd keep agents running close quit t3 service restart logs linger update don't run agents in the background",
     ],
     desktopOnly: true,
   },
