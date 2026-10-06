@@ -23,7 +23,6 @@ const emptyCatalog = {
   targets: [],
   profiles: [],
   credentials: [],
-  remoteDpopTokens: [],
   disabledEnvironmentIds: [],
 } as const;
 const decodeCatalog = Schema.decodeUnknownSync(Schema.fromJsonString(ConnectionCatalogDocument));

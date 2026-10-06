@@ -53,7 +53,6 @@ export interface SettingsSearchItem {
   // Its row only renders on Windows desktop, so other desktop platforms must
   // not expose a result that points to a missing anchor.
   readonly windowsOnly?: boolean;
-  readonly cloudOnly?: boolean;
   readonly environmentOnly?: boolean;
   readonly providerSettingsOnly?: boolean;
   readonly macProviderSettingsOnly?: boolean;
@@ -70,7 +69,6 @@ export interface SettingsSearchItem {
 
 export interface SettingsSearchAvailability {
   readonly localEnvironmentDisabled?: boolean;
-  readonly hasCloudPublicConfig: boolean;
   readonly hasEnvironment: boolean;
   readonly hasProviderSettingsEnvironment: boolean;
   readonly hasMacProviderSettingsEnvironment: boolean;
@@ -820,25 +818,6 @@ export const SETTINGS_SEARCH_ITEMS = [
     wslAvailableOnly: true,
   },
   {
-    id: "t3-connect",
-    localEnvironmentOnly: true,
-    title: "T3 Connect",
-    to: "/settings/connections",
-    targetId: "connections-environment",
-    searchTerms: ["managed tunnel cloud other devices remote"],
-    desktopOnly: true,
-    cloudOnly: true,
-  },
-  {
-    id: "publish-agent-activity",
-    localEnvironmentOnly: true,
-    title: "Publish agent activity",
-    to: "/settings/connections",
-    targetId: "connections-environment",
-    searchTerms: ["mobile push notifications live activities cloud tunnel"],
-    cloudOnly: true,
-  },
-  {
     id: "connections-environment",
     title: "This machine",
     to: "/settings/connections",
@@ -850,7 +829,7 @@ export const SETTINGS_SEARCH_ITEMS = [
     id: "remote-environments",
     title: "Environments",
     to: "/settings/connections",
-    searchTerms: ["add pair backend host code ssh config agent tunnel saved t3 connect"],
+    searchTerms: ["add pair backend host code ssh config agent tunnel saved"],
   },
   {
     id: "load-balancing",
@@ -1004,7 +983,6 @@ export function filterAvailableSettingsSearchItems(
   const items: ReadonlyArray<SettingsSearchItem> = SETTINGS_SEARCH_ITEMS;
   return items.filter(
     (item) =>
-      (!item.cloudOnly || availability.hasCloudPublicConfig) &&
       (!item.environmentOnly || availability.hasEnvironment) &&
       (!item.providerSettingsOnly || availability.hasProviderSettingsEnvironment) &&
       (!item.macProviderSettingsOnly || availability.hasMacProviderSettingsEnvironment) &&

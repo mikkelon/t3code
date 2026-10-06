@@ -23,10 +23,9 @@ import * as Socket from "effect/unstable/socket/Socket";
 import { fetchRemoteEnvironmentDescriptor } from "../environment/descriptor.ts";
 import { makeWsRpcProtocolClient } from "../rpc/protocol.ts";
 import { isLegacyUpdateHandoffLoss, resolveServerUpdateProgressResult } from "../state/server.ts";
-import * as RelayEnvironmentDiscovery from "../relay/discovery.ts";
 import * as ConnectionResolver from "./resolver.ts";
 import * as EnvironmentRegistry from "./registry.ts";
-import { connectionRoutes, hasRelayRoute, routeEntry, routeHttpBaseUrl } from "./routes.ts";
+import { connectionRoutes, routeEntry, routeHttpBaseUrl } from "./routes.ts";
 
 // A v1 host restarting into v2 runs migrations before its descriptor answers again.
 const OUTDATED_HOST_RESTART_TIMEOUT = Duration.minutes(4);
@@ -192,12 +191,6 @@ export const updateOutdatedHost = Effect.fn("clientRuntime.connection.updateOutd
       });
     }
 
-    // Discovery still holds the old relay descriptor and would re-block the
-    // environment from it, so replace that before clearing the block.
-    if (hasRelayRoute(entry)) {
-      const discovery = yield* RelayEnvironmentDiscovery.RelayEnvironmentDiscovery;
-      yield* discovery.refresh;
-    }
     yield* registry.setCompatibility(environmentId, null);
     yield* registry.setEnabled(environmentId, true);
     return { ...result, targetVersion: resumed.value.serverVersion };

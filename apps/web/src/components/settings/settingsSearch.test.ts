@@ -93,7 +93,6 @@ describe("searchSettings", () => {
   it("finds settings that used to be reachable only through their section", () => {
     expect(searchSettings("pull request template")[0]?.id).toBe("follow-change-request-templates");
     expect(searchSettings("git security keys")[0]?.id).toBe("git-fetch-interval");
-    expect(searchSettings("push notifications")[0]?.id).toBe("publish-agent-activity");
     expect(searchSettings("battery saver")[0]?.id).toBe("background-activity");
     expect(searchSettings("binary path")[0]?.id).toBe("providers");
     expect(searchSettings("Antigravity")[0]?.id).toBe("providers");
@@ -151,7 +150,6 @@ describe("searchSettings", () => {
 
   it("hides settings whose controls are unavailable", () => {
     const available = filterAvailableSettingsSearchItems({
-      hasCloudPublicConfig: false,
       hasEnvironment: false,
       hasProviderSettingsEnvironment: false,
       hasMacProviderSettingsEnvironment: false,
@@ -164,12 +162,10 @@ describe("searchSettings", () => {
       "follow-change-request-templates",
       "git-fetch-interval",
       "network-access",
-      "publish-agent-activity",
       "provider-health-check-interval",
       "cursor-keychain-usage",
       "source-control-writer-model",
       "source-control-writing-style",
-      "t3-connect",
       "tailscale-https",
       "wsl-backend",
       "auto-settle-inactive-threads",
@@ -181,7 +177,6 @@ describe("searchSettings", () => {
 
   it("offers Cursor Keychain settings only when a macOS provider environment is available", () => {
     const availability = {
-      hasCloudPublicConfig: false,
       hasEnvironment: true,
       hasProviderSettingsEnvironment: true,
       hasMacProviderSettingsEnvironment: false,
@@ -198,9 +193,8 @@ describe("searchSettings", () => {
     expect(itemIds(true)).toContain("cursor-keychain-usage");
   });
 
-  it("keeps the local toggle searchable without offering hidden host publishing controls", () => {
+  it("keeps the local toggle searchable without offering hidden local controls", () => {
     const availability = {
-      hasCloudPublicConfig: true,
       hasEnvironment: true,
       hasProviderSettingsEnvironment: true,
       hasMacProviderSettingsEnvironment: false,
@@ -213,17 +207,11 @@ describe("searchSettings", () => {
       localEnvironmentDisabled: true,
     }).map((item) => item.id);
     expect(remoteOnly).toContain("local-environment");
-    expect(remoteOnly).not.toContain("t3-connect");
-    expect(remoteOnly).not.toContain("publish-agent-activity");
     expect(remoteOnly).not.toContain("wsl-backend");
-    // Browsers without access:write still render CloudLinkRow for their host.
-    const browser = filterAvailableSettingsSearchItems(availability).map((item) => item.id);
-    expect(browser).toContain("publish-agent-activity");
   });
 
   it("shows automatic settlement settings when the server supports them", () => {
     const available = filterAvailableSettingsSearchItems({
-      hasCloudPublicConfig: false,
       hasEnvironment: false,
       hasProviderSettingsEnvironment: false,
       hasMacProviderSettingsEnvironment: false,
@@ -354,7 +342,6 @@ describe("searchSettings", () => {
 
   it("keeps environment settings discoverable without a primary environment", () => {
     const available = filterAvailableSettingsSearchItems({
-      hasCloudPublicConfig: false,
       hasEnvironment: true,
       hasProviderSettingsEnvironment: true,
       hasMacProviderSettingsEnvironment: false,
@@ -449,7 +436,6 @@ describe("auto-settlement search availability", () => {
     const availability = getThreadAutoSettlementSearchAvailability(environments);
     expect(availability.eligibleEnvironmentIds).toEqual([capable.environmentId]);
     const items = filterAvailableSettingsSearchItems({
-      hasCloudPublicConfig: false,
       hasEnvironment: true,
       hasProviderSettingsEnvironment: true,
       hasMacProviderSettingsEnvironment: false,

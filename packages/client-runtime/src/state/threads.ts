@@ -20,14 +20,12 @@ import * as SubscriptionRef from "effect/SubscriptionRef";
 import { HttpClient } from "effect/unstable/http";
 import { Atom } from "effect/unstable/reactivity";
 
-import * as RemoteEnvironmentAuthorization from "../authorization/service.ts";
 import * as EnvironmentRegistry from "../connection/registry.ts";
 import { connectionProjectionPhase } from "../connection/model.ts";
 import * as EnvironmentSupervisor from "../connection/supervisor.ts";
 import * as ConnectionWakeups from "../connection/wakeups.ts";
 import * as Persistence from "../platform/persistence.ts";
 import { runCachePersistence } from "./cachePersistence.ts";
-import * as ManagedRelay from "../relay/managedRelay.ts";
 import { subscribeDynamic } from "../rpc/client.ts";
 import { parseThreadKey, threadKey } from "./entities.ts";
 import { applyOrchestrationV2ProjectionEvent } from "./orchestrationV2Projection.ts";
@@ -177,10 +175,6 @@ export const makeEnvironmentThreadState = Effect.fn("EnvironmentThreadState.make
     ThreadHistoryController.ThreadHistoryController,
   );
   const httpClient = yield* Effect.serviceOption(HttpClient.HttpClient);
-  const dpopSigner = yield* Effect.serviceOption(ManagedRelay.ManagedRelayDpopSigner);
-  const remoteAuthorization = yield* Effect.serviceOption(
-    RemoteEnvironmentAuthorization.RemoteEnvironmentAuthorization,
-  );
   const wakeups = yield* Effect.serviceOption(ConnectionWakeups.ConnectionWakeups);
   const environmentId = supervisor.target.environmentId;
   const retained = resumeCache?.snapshot;
@@ -688,8 +682,6 @@ export const makeEnvironmentThreadState = Effect.fn("EnvironmentThreadState.make
         prepared: preparedOption.value,
         threadId,
         cursor: requestCursor,
-        signer: dpopSigner,
-        remoteAuthorization,
       }).pipe(Effect.provideService(HttpClient.HttpClient, httpClient.value), Effect.result);
 
       if (Result.isFailure(pageResult)) {

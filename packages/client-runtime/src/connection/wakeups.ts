@@ -6,7 +6,6 @@ export type ConnectionWakeup =
   | "application-active"
   | "application-active-probe"
   | "application-active-reconnect"
-  | "credentials-changed"
   // The device moved to a different network (another Wi-Fi, Wi-Fi to
   // cellular) while staying online. Saved routes may have changed reach.
   | "network-changed";

@@ -43,7 +43,6 @@ import {
   gitHubRoutingConnectionKey,
 } from "./githubRoutingPermissions.ts";
 import {
-  RELAY_ROUTE_ID,
   connectionRouteId,
   connectionRoutes,
   entryWithRoutes,
@@ -137,16 +136,6 @@ export class EnvironmentRegistry extends Context.Service<
       | EnvironmentNotRegisteredError
       | PlatformEnvironmentRemovalError
       | ConnectionBlockedError
-    >;
-    /**
-     * Drops the T3 Connect route of every environment, after a cloud sign-out
-     * or account change. Environments with no other route are removed.
-     */
-    readonly removeRelayEnvironments: () => Effect.Effect<
-      void,
-      | Persistence.ConnectionPersistenceError
-      | ConnectionAttemptError
-      | PlatformEnvironmentRemovalError
     >;
     readonly retryNow: (environmentId: EnvironmentId) => Effect.Effect<void>;
     /**
@@ -954,28 +943,6 @@ export const make = Effect.gen(function* () {
     );
   });
 
-  const removeRelayEnvironments = Effect.fn("EnvironmentRegistry.removeRelayEnvironments")(
-    function* () {
-      const relayEnvironmentIds = [...(yield* SubscriptionRef.get(entries)).values()]
-        .filter((entry) =>
-          connectionRoutes(entry).some((route) => route.target._tag === "RelayConnectionTarget"),
-        )
-        .map((entry) => entry.target.environmentId);
-
-      yield* Effect.forEach(
-        relayEnvironmentIds,
-        (environmentId) =>
-          removeRoute(environmentId, RELAY_ROUTE_ID).pipe(
-            Effect.catchTag("EnvironmentNotRegisteredError", () => Effect.void),
-          ),
-        {
-          concurrency: "unbounded",
-          discard: true,
-        },
-      );
-    },
-  );
-
   const retryNow = (environmentId: EnvironmentId) =>
     acquireSupervisor(environmentId).pipe(
       Effect.flatMap((supervisor) => supervisor.retryNow),
@@ -1127,7 +1094,6 @@ export const make = Effect.gen(function* () {
     remove,
     removeRoute,
     reorderRoutes,
-    removeRelayEnvironments,
     retryNow,
     setEnabled,
     setCompatibility,

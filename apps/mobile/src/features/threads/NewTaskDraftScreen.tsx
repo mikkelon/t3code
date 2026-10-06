@@ -32,7 +32,6 @@ import {
   PROVIDER_SEND_TURN_MAX_INPUT_CHARS,
   resolveEnvironmentMachineKind,
 } from "@t3tools/contracts";
-import { deriveThreadTitleSeed } from "@t3tools/client-runtime/operations";
 
 import {
   ComposerEditor,
@@ -114,7 +113,6 @@ import {
   isModelSelectionUnavailable,
   resolveSelectableModelSelection,
 } from "../../lib/modelOptions";
-import { armAgentAwarenessLiveActivityForLocalWork } from "../agent-awareness/remoteRegistration";
 import { enqueueThreadOutboxMessage } from "../../state/thread-outbox";
 import { useRemoteConnectionStatus } from "../../state/use-remote-environment-registry";
 import { useNewTaskFlow } from "./new-task-flow-provider";
@@ -1301,20 +1299,6 @@ export function NewTaskDraftScreen(props: {
     });
     if (!message) {
       return;
-    }
-    if (!queuesInsteadOfStarting) {
-      // Arm the lock-screen card before the async thread creation: backgrounding
-      // the app right after tapping submit would otherwise reject the foreground
-      // -only Activity start. If creation fails, the token registration's replay
-      // finds no work and ends the card within seconds.
-      armAgentAwarenessLiveActivityForLocalWork({
-        environmentId: selectedProject.environmentId,
-        threadTitle: deriveThreadTitleSeed({
-          text: initialMessageText,
-          attachments: draft.attachments,
-        }),
-        projectTitle: selectedProject.title,
-      });
     }
     // Persist before clearing the draft or leaving its editor. This only waits
     // for the local outbox write; server and worktree setup run on the thread.

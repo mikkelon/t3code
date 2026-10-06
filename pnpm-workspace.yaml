@@ -1,6 +1,5 @@
 packages:
   - apps/*
-  - infra/*
   - oxlint-plugin-t3code
   - packages/*
   - scripts
@@ -23,18 +22,10 @@ allowBuilds:
   workerd: false
 
 catalog:
-  "@clerk/backend": 3.18.1
-  "@clerk/clerk-js": 6.32.1
-  "@clerk/electron": 0.0.44
-  "@clerk/electron-passkeys": 0.0.3
-  "@clerk/expo": 4.6.8
-  "@clerk/react": 6.16.1
-  "@clerk/shared": 4.33.0
   "@effect/atom-react": 4.0.0-rc.115
   "@effect/openapi-generator": 4.0.0-rc.115
   "@effect/platform-node": 4.0.0-rc.115
   "@effect/platform-node-shared": 4.0.0-rc.115
-  "@effect/sql-pg": 4.0.0-rc.115
   "@effect/tsgo": 0.41.0
   "@effect/vitest": 4.0.0-rc.115
   "@legendapp/list": 3.3.5
@@ -58,25 +49,11 @@ minimumReleaseAgeExclude:
   - expo-glass-effect@58.0.3
   - expo-blur@58.0.3
   - expo-audio@58.0.4
-  - "@clerk/backend@3.18.1"
-  - "@clerk/clerk-js@6.32.1"
-  - "@clerk/electron@0.0.44"
-  - "@clerk/expo@4.6.8"
-  - "@clerk/react@6.16.1"
-  - "@clerk/shared@4.33.0"
-  - "@distilled.cloud/aws@1.0.0-rc.12"
-  - "@distilled.cloud/axiom@1.0.0-rc.12"
-  - "@distilled.cloud/cloudflare@1.0.0-rc.12"
-  - "@distilled.cloud/core@1.0.0-rc.12"
-  - "@distilled.cloud/neon@1.0.0-rc.12"
-  - "@distilled.cloud/planetscale@1.0.0-rc.12"
   - "@effect/atom-react@4.0.0-rc.115"
   - "@effect/openapi-generator@4.0.0-rc.115"
   - "@effect/platform-node-shared@4.0.0-rc.115"
   - "@effect/platform-node@4.0.0-rc.115"
-  - "@effect/sql-pg@4.0.0-rc.115"
   - "@effect/vitest@4.0.0-rc.115"
-  - alchemy@2.0.0-beta.79
   - effect@4.0.0-rc.115
   - "@legendapp/list@3.3.5"
   - "@expo/cli@58.1.1"
@@ -109,25 +86,15 @@ minimumReleaseAgeExclude:
   - expo-modules-autolinking@58.0.7
   - expo-modules-core@58.0.11
   - expo-modules-jsi@58.0.7
-  - expo-notifications@58.0.11
   - expo-sharing@58.0.13
   - expo-sqlite@58.0.8
   - expo-symbols@58.0.3
   - electron@44.4.2
   - "@anthropic-ai/claude-agent-sdk@0.3.276"
-  - "@alchemy.run/cloudflare-runtime@2.0.0-beta.79"
-  - "@alchemy.run/floci@2.0.0-beta.79"
-  - "@alchemy.run/node-utils@2.0.0-beta.79"
-  - "@distilled.cloud/fly-io@1.0.0-rc.12"
-  - "@distilled.cloud/hetzner@1.0.0-rc.12"
-  - "@distilled.cloud/prisma@1.0.0-rc.12"
-  - "@distilled.cloud/railway@1.0.0-rc.12"
-  - "@distilled.cloud/stripe@1.0.0-rc.12"
   - "@shadcn/lint@0.1.5"
   - cn@0.3.2
   - uniwind@1.12.1
   - "@expo/dom-webview@58.0.2"
-  - "expo-auth-session@58.0.7"
   - "expo-camera@58.0.7"
   - "expo-clipboard@58.0.3"
   - "expo-crypto@58.0.4"
@@ -140,7 +107,6 @@ minimumReleaseAgeExclude:
   - "expo-secure-store@58.0.2"
   - "expo-splash-screen@58.0.4"
   - "expo-video@58.0.6"
-  - "expo-web-browser@58.0.4"
   - "react@19.3.0"
   - "react-dom@19.3.0"
   - "react-native@0.88.0-rc.3"
@@ -170,33 +136,9 @@ overrides:
   "@anthropic-ai/claude-agent-sdk>@anthropic-ai/claude-agent-sdk-linux-x64-musl": "-"
   "@anthropic-ai/claude-agent-sdk>@anthropic-ai/claude-agent-sdk-win32-arm64": "-"
   "@anthropic-ai/claude-agent-sdk>@anthropic-ai/claude-agent-sdk-win32-x64": "-"
-  # Alchemy's Ink fork declares React as a hard dependency, but the relay only
-  # reaches its terminal-capability helpers; the TUI is never imported, so the
-  # extra React copy is pure install weight.
-  "@alchemy.run/sigil>react": "-"
-  "@alchemy.run/sigil>react-reconciler": "-"
-  "@alchemy.run/sigil>scheduler": "-"
-  # Alchemy only reaches @prisma/dev through a lazy import inside the Prisma
-  # database provider, which the relay never deploys. Its exact hono/valibot
-  # pins are also the bulk of our open dependency advisories.
-  "alchemy>@prisma/dev": "-"
-  "@clerk/backend": "catalog:"
-  "@clerk/clerk-js": "catalog:"
-  "@clerk/clerk-js>@base-org/account": "-"
-  "@clerk/clerk-js>@coinbase/wallet-sdk": "-"
-  "@clerk/clerk-js>@solana/wallet-adapter-base": "-"
-  "@clerk/clerk-js>@solana/wallet-adapter-react": "-"
-  "@clerk/clerk-js>@solana/wallet-standard": "-"
-  "@clerk/clerk-js>@wallet-standard/core": "-"
-  "@clerk/electron": "catalog:"
-  "@clerk/electron-passkeys": "catalog:"
-  "@clerk/expo": "catalog:"
-  "@clerk/react": "catalog:"
-  "@clerk/shared": "catalog:"
   "@effect/atom-react": "catalog:"
   "@effect/platform-node": "catalog:"
   "@effect/platform-node-shared": "catalog:"
-  "@effect/sql-pg": "catalog:"
   "@effect/vitest": "catalog:"
   "@effect/vitest>vitest": "-"
   "@expo/dom-webview": 58.0.2
@@ -226,9 +168,6 @@ overrides:
   yaml: "catalog:"
 
 packageExtensions:
-  "@clerk/expo@*":
-    dependencies:
-      "@expo/config-plugins": 58.0.4
   "@effect/vitest@*":
     dependencies:
       vite-plus: "catalog:"
@@ -240,11 +179,9 @@ packageExtensions:
       vite: "catalog:"
 
 patchedDependencies:
-  alchemy@2.0.0-beta.79: patches/alchemy@2.0.0-beta.79.patch
   expo-glass-effect@58.0.3: patches/expo-glass-effect@58.0.3.patch
   expo-blur@58.0.3: patches/expo-blur@58.0.3.patch
   expo-audio@58.0.4: patches/expo-audio@58.0.4.patch
-  "@clerk/expo@4.6.8": patches/@clerk__expo@4.6.8.patch
   "@effect/vitest@4.0.0-rc.115": patches/@effect__vitest@4.0.0-rc.115.patch
   "@expo/metro-config@58.0.6": patches/@expo__metro-config@58.0.6.patch
   expo-sharing@58.0.13: patches/expo-sharing@58.0.13.patch

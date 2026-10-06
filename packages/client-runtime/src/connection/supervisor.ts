@@ -1,4 +1,3 @@
-import { withRelayClientTracing } from "@t3tools/shared/relayTracing";
 import * as Cause from "effect/Cause";
 import * as Clock from "effect/Clock";
 import * as Context from "effect/Context";
@@ -28,7 +27,6 @@ import {
 } from "./model.ts";
 import * as RpcSession from "../rpc/session.ts";
 import { safeErrorLogAttributes } from "../errors/safeLog.ts";
-import { NETWORK_BLOCKING_HINT } from "../errors/network.ts";
 import * as ConnectionWakeups from "./wakeups.ts";
 import { connectionRouteId, connectionRoutes, entryWithRoutes } from "./routes.ts";
 
@@ -254,14 +252,7 @@ export const make = Effect.fn("EnvironmentSupervisor.make")(function* (
   | ConnectionWakeups.ConnectionWakeups
 > {
   const target = entry.target;
-  // Relay-specific handling applies when any route is T3 Connect, since the
-  // attempt or the live session may be using it.
-  const usesRelay = connectionRoutes(entry).some(
-    (route) => route.target._tag === "RelayConnectionTarget",
-  );
-  const setupTimeoutDetail = `${target.label} did not respond during connection setup.${
-    usesRelay ? ` ${NETWORK_BLOCKING_HINT}` : ""
-  }`;
+  const setupTimeoutDetail = `${target.label} did not respond during connection setup.`;
   yield* annotateTarget(target);
 
   const connectivity = yield* Connectivity.Connectivity;
@@ -342,7 +333,7 @@ export const make = Effect.fn("EnvironmentSupervisor.make")(function* (
 
   /**
    * Preflights the routes ranked above the one in use and signals the best
-   * that would connect. Routes without a cheap check (T3 Connect, SSH) never
+   * that would connect. Routes without a cheap check (SSH) never
    * pass, so they are fallbacks, not destinations.
    */
   const checkBetterRoutes = Effect.fnUntraced(function* (
@@ -396,15 +387,6 @@ export const make = Effect.fn("EnvironmentSupervisor.make")(function* (
     yield* Queue.offer(signals, next);
   });
 
-  const logManagedRelayAccountChange = Effect.logInfo(
-    "Managed relay account changed; restarting the environment connection.",
-  ).pipe(
-    Effect.annotateLogs({
-      "environment.id": target.environmentId,
-      "environment.label": target.label,
-    }),
-  );
-
   const reportProgress = Effect.fn("EnvironmentSupervisor.reportProgress")(function* (
     attempt: number,
     generation: number,
@@ -429,62 +411,12 @@ export const make = Effect.fn("EnvironmentSupervisor.make")(function* (
     );
   });
 
-  const traceRelayEstablishment = (
-    effect: Effect.Effect<
-      ConnectionDriver.EnvironmentConnectionLease,
-      ConnectionAttemptError,
-      Scope.Scope
-    >,
-    attempt: number,
-    generation: number,
-    pendingRetry: Option.Option<PendingRetryTrace>,
-  ) => {
-    const traced = Effect.gen(function* () {
-      const attemptSpan = yield* Effect.currentSpan.pipe(Effect.orDie);
-      yield* annotateTarget(target);
-      yield* Effect.annotateCurrentSpan({
-        "connection.attempt": attempt,
-        "connection.generation": generation,
-        "connection.retry.failure_count": Option.match(pendingRetry, {
-          onNone: () => 0,
-          onSome: (retry) => retry.failureCount,
-        }),
-      });
-      const lease = yield* effect.pipe(
-        Effect.mapError((error): TracedAttemptFailure => ({
-          error,
-          attemptSpan: Option.some(attemptSpan),
-        })),
-      );
-      return { attemptSpan: Option.some(attemptSpan), lease };
-    }).pipe(Effect.withSpan("relay.connection.attempt", { root: true }));
-
-    return Option.match(pendingRetry, {
-      onNone: () => traced,
-      onSome: (retry) =>
-        traced.pipe(
-          Effect.linkSpans(retry.previousAttempt, {
-            "connection.retry.delay_ms": retry.delayMs,
-            "connection.retry.reason": retry.reason,
-          }),
-        ),
-    }).pipe(withRelayClientTracing);
-  };
-
   const establishTracedConnection = Effect.fnUntraced(function* (
     attempt: number,
     generation: number,
     lastFailure: ConnectionAttemptError | null,
-    pendingRetry: Option.Option<PendingRetryTrace>,
+    _pendingRetry: Option.Option<PendingRetryTrace>,
   ) {
-    if (usesRelay) {
-      return yield* traceRelayEstablishment(
-        establishConnection(attempt, generation, lastFailure),
-        attempt,
-        generation,
-        pendingRetry,
-      );
-    }
     return yield* establishConnection(attempt, generation, lastFailure).pipe(
       Effect.map((lease) => ({
         attemptSpan: Option.none<Tracer.Span>(),
@@ -516,10 +448,6 @@ export const make = Effect.fn("EnvironmentSupervisor.make")(function* (
           if (next.reason === "application-active-reconnect") {
             return true;
           }
-          if (next.reason === "credentials-changed" && usesRelay) {
-            yield* logManagedRelayAccountChange;
-            return false;
-          }
           break;
       }
     }
@@ -527,13 +455,7 @@ export const make = Effect.fn("EnvironmentSupervisor.make")(function* (
 
   // Signals that end a connected lease whatever its health: "reset" ends it
   // and restarts the retry ladder, "end" ends it, undefined keeps it.
-  const isRelayLease = (lease: ConnectionDriver.EnvironmentConnectionLease) =>
-    lease.prepared.target._tag === "RelayConnectionTarget";
-
-  const connectedLeaseEnd = Effect.fnUntraced(function* (
-    next: SupervisorSignal,
-    lease: ConnectionDriver.EnvironmentConnectionLease,
-  ) {
+  const connectedLeaseEnd = Effect.fnUntraced(function* (next: SupervisorSignal) {
     if (next._tag === "DisconnectRequested") {
       return "end" as const;
     }
@@ -551,11 +473,6 @@ export const make = Effect.fn("EnvironmentSupervisor.make")(function* (
       // event. A probe would show a dead socket as "Resuming" until it times
       // out, so a long background resume replaces the session at once.
       return "reset" as const;
-    }
-    // Only a session over T3 Connect holds the old account's credential.
-    if (next.reason === "credentials-changed" && isRelayLease(lease)) {
-      yield* logManagedRelayAccountChange;
-      return "end" as const;
     }
     return undefined;
   });
@@ -609,7 +526,7 @@ export const make = Effect.fn("EnvironmentSupervisor.make")(function* (
     );
     for (;;) {
       const next = yield* takeSignal;
-      const end = yield* connectedLeaseEnd(next, lease);
+      const end = yield* connectedLeaseEnd(next);
       if (end !== undefined) {
         return end === "reset";
       }
@@ -653,7 +570,7 @@ export const make = Effect.fn("EnvironmentSupervisor.make")(function* (
           yield* probeEvent.exit;
           break;
         }
-        const endDuringProbe = yield* connectedLeaseEnd(probeEvent.signal, lease);
+        const endDuringProbe = yield* connectedLeaseEnd(probeEvent.signal);
         if (endDuringProbe !== undefined) {
           yield* Fiber.interrupt(probe);
           return endDuringProbe === "reset";

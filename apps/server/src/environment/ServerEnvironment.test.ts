@@ -19,11 +19,6 @@ import {
 import * as OtelEnvironment from "@t3tools/shared/otelEnvironment";
 
 import * as ServerSecretStore from "../auth/ServerSecretStore.ts";
-import {
-  PUBLISH_AGENT_ACTIVITY_SECRET,
-  RELAY_ENVIRONMENT_CREDENTIAL_SECRET,
-  RELAY_URL_SECRET,
-} from "../cloud/config.ts";
 import * as ServerConfig from "../config.ts";
 import * as ServerEnvironment from "./ServerEnvironment.ts";
 
@@ -231,7 +226,7 @@ it.layer(NodeServices.layer)("ServerEnvironmentLive", (it) => {
     }),
   );
 
-  it.effect("reports agent activity publishing from the current secret state", () =>
+  it.effect("never advertises agent activity publishing, even with legacy T3 Connect secrets", () =>
     Effect.gen(function* () {
       const fileSystem = yield* FileSystem.FileSystem;
       const baseDir = yield* fileSystem.makeTempDirectoryScoped({
@@ -247,32 +242,13 @@ it.layer(NodeServices.layer)("ServerEnvironmentLive", (it) => {
         const serverEnvironment = yield* ServerEnvironment.ServerEnvironment;
         const encode = (value: string) => new TextEncoder().encode(value);
 
-        const unlinked = yield* serverEnvironment.getDescriptor;
-        expect(unlinked.capabilities.agentActivityPublishing).toBe(false);
+        // Secrets an upstream build stored while linked to T3 Connect.
+        yield* secrets.set("cloud-publish-agent-activity", encode("true"));
+        yield* secrets.set("cloud-relay-url", encode("https://relay.example"));
+        yield* secrets.set("cloud-relay-environment-credential", encode("credential"));
 
-        // The opt-in alone is not enough: without relay link credentials no
-        // publish would leave this environment.
-        yield* secrets.set(PUBLISH_AGENT_ACTIVITY_SECRET, encode("true"));
-        const withoutLink = yield* serverEnvironment.getDescriptor;
-        expect(withoutLink.capabilities.agentActivityPublishing).toBe(false);
-
-        // Empty credentials are as unconfigured as missing ones: the
-        // publisher's truthiness gate skips them, so the capability must not
-        // advertise publishing.
-        yield* secrets.set(RELAY_URL_SECRET, encode(""));
-        yield* secrets.set(RELAY_ENVIRONMENT_CREDENTIAL_SECRET, encode("credential"));
-        const emptyUrl = yield* serverEnvironment.getDescriptor;
-        expect(emptyUrl.capabilities.agentActivityPublishing).toBe(false);
-
-        yield* secrets.set(RELAY_URL_SECRET, encode("https://relay.example"));
-        const linked = yield* serverEnvironment.getDescriptor;
-        expect(linked.capabilities.agentActivityPublishing).toBe(true);
-
-        // The toggle changes at runtime, so the same service instance must
-        // reflect a flip without a restart.
-        yield* secrets.set(PUBLISH_AGENT_ACTIVITY_SECRET, encode("false"));
-        const disabled = yield* serverEnvironment.getDescriptor;
-        expect(disabled.capabilities.agentActivityPublishing).toBe(false);
+        const descriptor = yield* serverEnvironment.getDescriptor;
+        expect(descriptor.capabilities.agentActivityPublishing).toBe(false);
       }).pipe(Effect.provide(testLayer));
     }),
   );

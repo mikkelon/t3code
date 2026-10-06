@@ -15,7 +15,6 @@
 - [Import browser sessions](./user/browser-import.md)
 - [Devices](./user/devices.md)
 - [Usage and limits](./user/usage.md)
-- [Product usage data](./user/telemetry.md)
 - [Remote access](./user/remote-access.md)
 - [Running in the background](./user/background-service.md)
 - [Updating T3 Code](./user/updating.md)
@@ -41,9 +40,7 @@ source alone does not explain. Most code changes do not need an internal documen
 - [Remote environments](./internals/remote.md)
 - [Server updates](./internals/server-updates.md)
 - [Resource telemetry](./internals/resource-telemetry.md)
-- [Product analytics](./internals/product-analytics.md)
 - [Environment auth](./internals/environment-auth.md)
-- [T3 Connect](./internals/t3-connect.md)
 - [Assistant citations](./internals/assistant-citations.md)
 - [Mobile navigation](./internals/mobile-navigation.md)
 - [Mobile development lifecycle](./internals/mobile-development.md)
@@ -54,9 +51,7 @@ source alone does not explain. Most code changes do not need an internal documen
 ### Runbooks
 
 - [Development and local builds](./operations/development.md)
-- [T3 Connect setup](./operations/connect-setup.md)
 - [Release](./operations/release.md)
 - [Observability](./operations/observability.md)
-- [Relay observability](./operations/relay-observability.md)
 - [Mobile app store screenshots](./operations/mobile-app-store-screenshots.md)
 - [Syncing the fork with upstream](./operations/fork-sync.md)
