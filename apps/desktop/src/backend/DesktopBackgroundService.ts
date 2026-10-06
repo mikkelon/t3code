@@ -188,20 +188,20 @@ function namesSameOrigin(raw: string, current: URL): boolean {
 }
 
 /** The JSON object a CLI printed, ignoring any noise around it. */
-export function extractJsonObject(output: string): string | undefined {
+function extractJsonObject(output: string): string | undefined {
   const start = output.indexOf("{");
   const end = output.lastIndexOf("}");
   return start === -1 || end < start ? undefined : output.slice(start, end + 1);
 }
 
 /** The exact `loginctl` command for a CLI failure that needs lingering. */
-export function lingerCommandFor(output: string, username: string): string | undefined {
+function lingerCommandFor(output: string, username: string): string | undefined {
   return output.includes("[linger-disabled]")
     ? `sudo loginctl enable-linger ${username}`
     : undefined;
 }
 
-export const make = Effect.gen(function* () {
+const make = Effect.gen(function* () {
   const environment = yield* DesktopEnvironment.DesktopEnvironment;
   const fs = yield* FileSystem.FileSystem;
   const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
