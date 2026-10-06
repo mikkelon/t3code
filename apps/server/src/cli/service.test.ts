@@ -54,7 +54,7 @@ it("explains an incomplete nightly installation and keeps repair on its installe
   );
 
   expect(output).toContain("[linger-disabled]");
-  expect(output).toContain("last login session ends");
+  expect(output).toContain("stops when your last login session ends");
   expect(output).toContain('sudo loginctl enable-linger "$(id -un)"');
   expect(output).toContain("[service-stopped]");
   expect(output).toContain("Run `t3 service install` to repair it.");
@@ -260,7 +260,7 @@ it.effect.each([
       ...status,
       current: false,
       installedVersion: packageJson.version,
-      problems: ["linger-disabled"] as const,
+      problems: ["service-stopped"] as const,
     },
   },
   { name: "an unknown version", state: { ...status, current: false } },
