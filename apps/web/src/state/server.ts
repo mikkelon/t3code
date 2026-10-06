@@ -18,6 +18,7 @@ import { AsyncResult, Atom } from "effect/unstable/reactivity";
 
 import { environmentCatalog } from "../connection/catalog";
 import { connectionAtomRuntime } from "../connection/runtime";
+import { selectKeybindingsConfig } from "./keybindingsSource";
 import { primaryEnvironmentIdAtom } from "./primaryEnvironment";
 import { environmentSession } from "./session";
 
@@ -106,9 +107,18 @@ export const primaryServerProvidersAtom = Atom.make(
     get(primaryServerConfigAtom)?.providers ?? EMPTY_SERVER_PROVIDERS,
 ).pipe(Atom.withLabel("web-primary-server-providers"));
 
-export const primaryServerKeybindingsAtom = Atom.make((get): ServerConfig["keybindings"] =>
-  mergeWithDefaultKeybindings(get(primaryServerConfigAtom)?.keybindings ?? []),
-).pipe(Atom.withLabel("web-primary-server-keybindings"));
+export const primaryServerKeybindingsAtom = Atom.make((get): ServerConfig["keybindings"] => {
+  const primaryEnvironmentId = get(primaryEnvironmentIdAtom);
+  const config = selectKeybindingsConfig({
+    primaryEnvironmentId,
+    primaryConfig: get(primaryServerConfigAtom),
+    // Only read without a primary, so ordinary use does not track every
+    // environment's config.
+    environmentConfigs:
+      primaryEnvironmentId === null ? get(environmentServerConfigsAtom) : new Map(),
+  });
+  return mergeWithDefaultKeybindings(config?.keybindings ?? []);
+}).pipe(Atom.withLabel("web-primary-server-keybindings"));
 
 export const primaryServerAvailableEditorsAtom = Atom.make(
   (get): ReadonlyArray<EditorId> =>

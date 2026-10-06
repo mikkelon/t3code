@@ -21,6 +21,7 @@ vi.mock("electron", () => ({
 
 import * as DesktopBackendManager from "../../backend/DesktopBackendManager.ts";
 import * as DesktopBackendPool from "../../backend/DesktopBackendPool.ts";
+import * as DesktopBackgroundService from "../../backend/DesktopBackgroundService.ts";
 import * as ElectronDialog from "../../electron/ElectronDialog.ts";
 import * as ElectronWindow from "../../electron/ElectronWindow.ts";
 import * as DesktopAppSettings from "../../settings/DesktopAppSettings.ts";
@@ -86,7 +87,53 @@ describe("getLocalEnvironmentBootstraps", () => {
           bootstrapToken: "bootstrap-token",
         },
       ]);
-    }).pipe(Effect.provide(DesktopBackendPool.layerTest([defaultWslInstance]))),
+    }).pipe(
+      Effect.provide(
+        Layer.merge(
+          DesktopBackendPool.layerTest([defaultWslInstance]),
+          DesktopBackgroundService.layerTest(),
+        ),
+      ),
+    ),
+  );
+
+  it.effect("publishes an adopted background service as the primary environment", () =>
+    Effect.gen(function* () {
+      const result = yield* getLocalEnvironmentBootstraps.handler();
+
+      assert.deepEqual(result, [
+        {
+          id: "primary",
+          label: "Background service",
+          runningDistro: null,
+          httpBaseUrl: "http://127.0.0.1:3773/",
+          wsBaseUrl: "ws://127.0.0.1:3773/",
+          backgroundService: true,
+        },
+        {
+          id: "wsl:default",
+          label: "WSL (Ubuntu)",
+          runningDistro: "Ubuntu",
+          httpBaseUrl: "http://127.0.0.1:3774/",
+          wsBaseUrl: "ws://127.0.0.1:3774/",
+          bootstrapToken: "bootstrap-token",
+        },
+      ]);
+    }).pipe(
+      Effect.provide(
+        Layer.merge(
+          DesktopBackendPool.layerTest([defaultWslInstance]),
+          DesktopBackgroundService.layerTest({
+            adopted: Effect.succeedSome({
+              httpBaseUrl: new URL("http://127.0.0.1:3773"),
+              environmentId: "env-home",
+              serverVersion: "1.2.3",
+              serviceManaged: true,
+            }),
+          }),
+        ),
+      ),
+    ),
   );
 
   it.effect("publishes a pending bootstrap only while a transient retry is scheduled", () => {
@@ -121,7 +168,14 @@ describe("getLocalEnvironmentBootstraps", () => {
           wsBaseUrl: null,
         },
       ]);
-    }).pipe(Effect.provide(DesktopBackendPool.layerTest([retryingInstance])));
+    }).pipe(
+      Effect.provide(
+        Layer.merge(
+          DesktopBackendPool.layerTest([retryingInstance]),
+          DesktopBackgroundService.layerTest(),
+        ),
+      ),
+    );
   });
 
   it.effect("omits a bounded transient bootstrap after retries stop", () => {
@@ -147,7 +201,14 @@ describe("getLocalEnvironmentBootstraps", () => {
     return Effect.gen(function* () {
       const result = yield* getLocalEnvironmentBootstraps.handler();
       assert.deepEqual(result, []);
-    }).pipe(Effect.provide(DesktopBackendPool.layerTest([stoppedInstance])));
+    }).pipe(
+      Effect.provide(
+        Layer.merge(
+          DesktopBackendPool.layerTest([stoppedInstance]),
+          DesktopBackgroundService.layerTest(),
+        ),
+      ),
+    );
   });
 });
 

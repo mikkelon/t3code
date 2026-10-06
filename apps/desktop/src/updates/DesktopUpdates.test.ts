@@ -728,6 +728,27 @@ describe("DesktopUpdates", () => {
     ).pipe(Effect.provide(Layer.merge(TestClock.layer(), harness.layer)));
   });
 
+  it.effect("install recovery never starts a backend that was not running", () => {
+    const harness = makeHarness({ backendRunning: false });
+
+    return Effect.scoped(
+      Effect.gen(function* () {
+        const updates = yield* DesktopUpdates.DesktopUpdates;
+        yield* updates.configure;
+        harness.emit("update-downloaded", { version: "1.2.4" });
+        yield* flushCallbacks;
+
+        yield* updates.install;
+        harness.emit("error", new Error("native installer refused"));
+        yield* flushCallbacks;
+
+        // The adopted background service owns the T3 home; the embedded
+        // primary must stay off.
+        assert.deepEqual(harness.installSteps, ["quitAndInstall"]);
+      }),
+    ).pipe(Effect.provide(Layer.merge(TestClock.layer(), harness.layer)));
+  });
+
   it.effect("rejects a prepared install when the downloaded version changed", () => {
     const harness = makeHarness();
 

@@ -15,6 +15,7 @@ import { AsyncResult, Atom } from "effect/unstable/reactivity";
 
 import { environmentCatalog } from "../connection/catalog";
 import { connectionAtomRuntime } from "../connection/runtime";
+import { primaryEnvironmentIdAtom } from "./primaryEnvironment";
 import { environmentSnapshotAtom } from "./shell";
 
 export const threadEnvironment = createThreadEnvironmentAtoms(
@@ -134,3 +135,12 @@ export const runningThreadKeepAliveAtom = createRunningThreadKeepAliveAtom({
   threadsAtom: environmentThreadShells.environmentThreadsAtom,
   stateAtom: environmentThreads.stateAtom,
 });
+
+/** Running threads on the primary environment. The desktop app asks before quitting over them. */
+export const primaryRunningThreadCountAtom = Atom.make((get) => {
+  const environmentId = get(primaryEnvironmentIdAtom);
+  if (environmentId === null) return 0;
+  return get(environmentThreadShells.environmentThreadsAtom(environmentId)).filter((thread) =>
+    isRunning(thread.status),
+  ).length;
+}).pipe(Atom.withLabel("web-primary-running-thread-count"));

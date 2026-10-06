@@ -789,6 +789,16 @@ export const SETTINGS_SEARCH_ITEMS = [
     desktopOnly: true,
   },
   {
+    id: "background-service",
+    title: "Keep agents running in the background",
+    to: "/settings/connections",
+    targetId: "connections-environment",
+    searchTerms: [
+      "background service daemon systemd launchd keep agents running close quit t3 service",
+    ],
+    desktopOnly: true,
+  },
+  {
     id: "network-access",
     title: "Network access",
     to: "/settings/connections",
