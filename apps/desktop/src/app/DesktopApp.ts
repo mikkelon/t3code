@@ -160,9 +160,10 @@ export const stopAllPoolInstances = Effect.fn("desktop.app.stopAllPoolInstances"
   },
 );
 
-// A T3 server already owns this home, or the background service is installed
-// for it: adopt that server instead of embedding a second backend on the same
-// database. Resolves false when nothing owns the home after all.
+// A T3 server already owns this home, the background service is installed for
+// it, or the app installs the service now: adopt that server instead of
+// embedding a second backend on the same database. Resolves false when the
+// app runs its own backend after all.
 const bootstrapAdoptedLocalEnvironment = Effect.fn("desktop.bootstrap.adoptLocalEnvironment")(
   function* (decision: DesktopBackgroundService.LocalServerDecision) {
     const state = yield* DesktopState.DesktopState;
@@ -380,7 +381,6 @@ const scopedProgram = Effect.scoped(
 
     const shutdown = yield* DesktopShutdown.DesktopShutdown;
     const rendererHistory = yield* DesktopRendererHistory.DesktopRendererHistory;
-    const backgroundService = yield* DesktopBackgroundService.DesktopBackgroundService;
 
     yield* Effect.addFinalizer(() =>
       // Stop every backend in the pool, not just the primary. The
@@ -389,8 +389,6 @@ const scopedProgram = Effect.scoped(
       // finalizer means it gets hard-killed by the OS instead of
       // receiving SIGTERM + grace.
       stopAllPoolInstances().pipe(
-        // Only after the embedded backend is gone, so the two never overlap.
-        Effect.andThen(backgroundService.startAfterShutdown),
         Effect.ensuring(rendererHistory.shutdown),
         Effect.ensuring(shutdown.markComplete),
       ),

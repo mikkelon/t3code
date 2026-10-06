@@ -3460,7 +3460,9 @@ export function ConnectionsSettings() {
                       label={
                         primaryServerUpdateState.status === "failed"
                           ? "Retry update"
-                          : `Update to ${primaryVersionMismatch.clientVersion}`
+                          : isLocalEnvironmentBackgroundService()
+                            ? "Update now"
+                            : `Update to ${primaryVersionMismatch.clientVersion}`
                       }
                     />
                   ) : primaryServerUpdateState.status === "idle" && primaryServerConfig ? (

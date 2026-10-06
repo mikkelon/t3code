@@ -21,6 +21,7 @@ const PROBE_TIMEOUT = Duration.millis(2_500);
 const PersistedServerRuntimeState = Schema.Struct({
   pid: Schema.Int,
   origin: Schema.String,
+  startedAt: Schema.optional(Schema.String),
   serviceManaged: Schema.optional(Schema.Boolean),
 });
 const decodeRuntimeState = Schema.decodeUnknownOption(
@@ -32,24 +33,31 @@ export interface LiveLocalServer {
   readonly environmentId: string;
   readonly serverVersion: string;
   readonly serviceManaged: boolean;
+  readonly startedAt: string | undefined;
 }
 
 export type LocalServerDecision =
   | { readonly _tag: "Adopt"; readonly server: LiveLocalServer }
   | { readonly _tag: "StartService" }
+  | { readonly _tag: "InstallService" }
   | { readonly _tag: "Embed" };
 
 /**
  * A live server that answers as this home's environment is adopted. Without
  * one, an installed service is started and adopted rather than embedding a
- * second backend next to it. Only a home with neither embeds.
+ * second backend next to it. Without either, the app installs the service
+ * when it may, and only otherwise embeds. Nothing runs yet at this point, so
+ * installing never puts two servers on one home.
  */
 export function decideLocalServer(input: {
   readonly serviceInstalled: boolean;
   readonly live: Option.Option<LiveLocalServer>;
+  /** This build ships a service runtime and the user has not opted out. */
+  readonly autoInstall: boolean;
 }): LocalServerDecision {
   if (Option.isSome(input.live)) return { _tag: "Adopt", server: input.live.value };
-  return input.serviceInstalled ? { _tag: "StartService" } : { _tag: "Embed" };
+  if (input.serviceInstalled) return { _tag: "StartService" };
+  return input.autoInstall ? { _tag: "InstallService" } : { _tag: "Embed" };
 }
 
 /** Signal 0 only checks that the pid exists; EPERM means it exists for another user. */
@@ -138,5 +146,6 @@ export const probeLiveLocalServer = Effect.fn("desktop.localServer.probeLive")(f
     environmentId: descriptor.value.environmentId,
     serverVersion: descriptor.value.serverVersion,
     serviceManaged: state.value.serviceManaged === true,
+    startedAt: state.value.startedAt,
   });
 });

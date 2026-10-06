@@ -15,6 +15,7 @@ import serverPackageJson from "../../../server/package.json" with { type: "json"
 import * as DesktopConfig from "../app/DesktopConfig.ts";
 import * as DesktopEnvironment from "../app/DesktopEnvironment.ts";
 import * as ElectronDialog from "../electron/ElectronDialog.ts";
+import * as DesktopAppSettings from "../settings/DesktopAppSettings.ts";
 import * as DesktopBackgroundService from "./DesktopBackgroundService.ts";
 
 const encoder = new TextEncoder();
@@ -23,6 +24,8 @@ interface Harness {
   readonly home: string;
   readonly stateDir: string;
   readonly unitPath: string;
+  /** The service runtime the packaged app ships. */
+  readonly runtimeArchive: string;
   /** Every CLI invocation, as its arguments after the entry script. */
   readonly commands: string[];
   readonly dialogs: string[];
@@ -39,7 +42,7 @@ const installUnit = (harness: Harness) =>
       harness.unitPath,
       `[Service]\nEnvironment=T3CODE_HOME=${path.join(harness.home, ".t3")}\n`,
     );
-  });
+  }).pipe(Effect.provide(NodeServices.layer), Effect.orDie);
 
 // The test process itself: alive for as long as the test runs.
 const runtimeStateJson = (port = 3773) =>
@@ -61,6 +64,12 @@ const makeHarness = Effect.fn("test.makeBackgroundServiceHarness")(function* (op
   }>;
   readonly dialogResponses?: number[];
   readonly authenticated?: (token: string) => boolean;
+  /** The version the running server reports. Defaults to the app's own. */
+  readonly serverVersion?: string;
+  readonly platform?: NodeJS.Platform;
+  /** False for a build without a service runtime, such as a development build. */
+  readonly shipsRuntime?: boolean;
+  readonly settings?: Partial<DesktopAppSettings.DesktopSettings>;
 }) {
   const fs = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
@@ -68,10 +77,15 @@ const makeHarness = Effect.fn("test.makeBackgroundServiceHarness")(function* (op
   const stateDir = path.join(home, ".t3", "userdata");
   yield* fs.makeDirectory(stateDir, { recursive: true });
   yield* fs.writeFileString(path.join(stateDir, "environment-id"), "env-home\n");
+  const resourcesPath = path.join(home, "app-resources");
+  yield* fs.makeDirectory(resourcesPath, { recursive: true });
+  const runtimeArchive = path.join(resourcesPath, "service-runtime.tar.gz");
+  if (options.shipsRuntime !== false) yield* fs.writeFileString(runtimeArchive, "archive");
   const harness: Harness = {
     home,
     stateDir,
     unitPath: path.join(home, ".config", "systemd", "user", "t3code.service"),
+    runtimeArchive,
     commands: [],
     dialogs: [],
     writeRuntimeState: fs
@@ -82,9 +96,16 @@ const makeHarness = Effect.fn("test.makeBackgroundServiceHarness")(function* (op
 
   const spawner = ChildProcessSpawner.make((command) =>
     Effect.gen(function* () {
-      const args = (command as unknown as { readonly args: ReadonlyArray<string> }).args
-        .slice(1)
-        .join(" ");
+      const standard = command as unknown as {
+        readonly command: string;
+        readonly args: ReadonlyArray<string>;
+      };
+      // The bundled CLI is this process with the server entry; anything else
+      // is recorded with its executable.
+      const args =
+        standard.command === process.execPath
+          ? standard.args.slice(1).join(" ")
+          : [standard.command, ...standard.args].join(" ");
       harness.commands.push(args);
       const result = options.onCommand
         ? yield* options.onCommand(args, harness)
@@ -115,7 +136,7 @@ const makeHarness = Effect.fn("test.makeBackgroundServiceHarness")(function* (op
             environmentId: "env-home",
             label: "This machine",
             platform: { os: "linux", arch: "x64" },
-            serverVersion: serverPackageJson.version,
+            serverVersion: options.serverVersion ?? serverPackageJson.version,
             capabilities: { repositoryIdentity: true },
           }),
         );
@@ -140,12 +161,12 @@ const makeHarness = Effect.fn("test.makeBackgroundServiceHarness")(function* (op
   const environmentLayer = DesktopEnvironment.layer({
     dirname: "/repo/apps/desktop/src",
     homeDirectory: home,
-    platform: "linux",
+    platform: options.platform ?? "linux",
     processArch: "x64",
     appVersion: serverPackageJson.version,
     appPath: "/repo",
     isPackaged: true,
-    resourcesPath: "/missing/resources",
+    resourcesPath,
     runningUnderArm64Translation: false,
   }).pipe(
     Layer.provide(
@@ -169,6 +190,12 @@ const makeHarness = Effect.fn("test.makeBackgroundServiceHarness")(function* (op
           }),
       }),
     ),
+    Layer.provideMerge(
+      DesktopAppSettings.layerTest({
+        ...DesktopAppSettings.DEFAULT_DESKTOP_SETTINGS,
+        ...options.settings,
+      }),
+    ),
     Layer.provideMerge(NodeServices.layer),
   );
   return { harness, layer };
@@ -180,15 +207,165 @@ const issuedSessionOutput = (token: string) =>
 const cli = (harness: Harness, command: string) =>
   harness.commands.filter((args) => args.startsWith(command));
 
+const baseDirOf = (harness: Harness) => `${harness.home}/.t3`;
+
+/** What `t3 service install` leaves behind once the service runs. */
+const serviceRunning = (harness: Harness) =>
+  Effect.all([installUnit(harness), writeRuntimeState(harness)]);
+
+/** What `t3 service uninstall` leaves behind. */
+const serviceRemoved = (harness: Harness) =>
+  Effect.gen(function* () {
+    const fs = yield* FileSystem.FileSystem;
+    yield* fs.remove(harness.unitPath, { force: true });
+    yield* fs.remove(`${harness.stateDir}/server-runtime.json`, { force: true });
+  }).pipe(Effect.provide(NodeServices.layer), Effect.orDie);
+
+const succeed = (output = "") => Effect.succeed({ output, exitCode: 0 });
+
 describe("DesktopBackgroundService", () => {
   it.layer(NodeServices.layer)((it) => {
+    it.effect("installs the service from the shipped runtime on first launch and adopts it", () =>
+      Effect.gen(function* () {
+        const { harness, layer } = yield* makeHarness({
+          onCommand: (args, current) =>
+            args.startsWith("service install")
+              ? serviceRunning(current).pipe(Effect.as({ output: "Installed.", exitCode: 0 }))
+              : succeed(issuedSessionOutput("token-1")),
+        });
+
+        yield* Effect.gen(function* () {
+          const service = yield* DesktopBackgroundService.DesktopBackgroundService;
+          const decision = yield* service.decide;
+          assert.deepEqual(decision, { _tag: "InstallService" });
+          assert.equal(yield* service.adopt(decision), "adopted");
+          assert.equal(yield* service.getBearerToken, "token-1");
+          // The one-time notice, for this launch only.
+          assert.isTrue(yield* service.takeInstallNotice);
+          assert.isFalse(yield* service.takeInstallNotice);
+        }).pipe(Effect.provide(layer));
+
+        assert.deepEqual(harness.commands, [
+          `service install --base-dir ${baseDirOf(harness)} --runtime-archive ${harness.runtimeArchive}`,
+          `auth session issue --base-dir ${baseDirOf(harness)} --label T3 Code Desktop --json`,
+        ]);
+        assert.deepEqual(harness.dialogs, []);
+      }),
+    );
+
+    it.effect.each([
+      { name: "the user opted out", options: { settings: { backgroundServiceDisabled: true } } },
+      { name: "the build ships no service runtime", options: { shipsRuntime: false } },
+      { name: "it runs on Windows", options: { platform: "win32" as const } },
+    ])("runs the app's own backend when $name", ({ options }) =>
+      Effect.gen(function* () {
+        const { harness, layer } = yield* makeHarness(options);
+        yield* Effect.gen(function* () {
+          const service = yield* DesktopBackgroundService.DesktopBackgroundService;
+          assert.deepEqual(yield* service.decide, { _tag: "Embed" });
+        }).pipe(Effect.provide(layer));
+        assert.deepEqual(harness.commands, []);
+      }),
+    );
+
+    it.effect("adopts a service the user installed by hand without reinstalling it", () =>
+      Effect.gen(function* () {
+        const { harness, layer } = yield* makeHarness({
+          onCommand: () => succeed(issuedSessionOutput("token-1")),
+          settings: { backgroundServiceDisabled: true },
+        });
+        yield* serviceRunning(harness);
+        yield* Effect.gen(function* () {
+          const service = yield* DesktopBackgroundService.DesktopBackgroundService;
+          const decision = yield* service.decide;
+          assert.equal(decision._tag, "Adopt");
+          assert.equal(yield* service.adopt(decision), "adopted");
+          assert.isFalse(yield* service.takeInstallNotice);
+        }).pipe(Effect.provide(layer));
+        assert.deepEqual(cli(harness, "service"), []);
+      }),
+    );
+
+    it.effect(
+      "falls back to the app's own backend after a failed install, without the service",
+      () =>
+        Effect.gen(function* () {
+          const { harness, layer } = yield* makeHarness({
+            // Retry once, then continue without it.
+            dialogResponses: [0, 1],
+            onCommand: (args, current) =>
+              args.startsWith("service install")
+                ? // The unit was written before the start failed.
+                  installUnit(current).pipe(
+                    Effect.as({
+                      output: "Background setup failed while starting the service (exit code 1).",
+                      exitCode: 1,
+                    }),
+                  )
+                : args.startsWith("service uninstall")
+                  ? serviceRemoved(current).pipe(Effect.as({ output: "Removed.", exitCode: 0 }))
+                  : succeed(),
+          });
+
+          yield* Effect.gen(function* () {
+            const service = yield* DesktopBackgroundService.DesktopBackgroundService;
+            assert.equal(yield* service.adopt(yield* service.decide), "embed");
+            // This launch does not try again behind the user's back.
+            assert.deepEqual(yield* service.decide, { _tag: "Embed" });
+            const state = yield* service.state;
+            assert.equal(
+              state.error,
+              "Background setup failed while starting the service (exit code 1).",
+            );
+            assert.isFalse(state.installed);
+            assert.isFalse(state.disabled);
+          }).pipe(Effect.provide(layer));
+
+          assert.deepEqual(cli(harness, "service"), [
+            `service install --base-dir ${baseDirOf(harness)} --runtime-archive ${harness.runtimeArchive}`,
+            `service install --base-dir ${baseDirOf(harness)} --runtime-archive ${harness.runtimeArchive}`,
+            `service uninstall --base-dir ${baseDirOf(harness)}`,
+          ]);
+          assert.deepEqual(harness.dialogs, [
+            "T3 Code couldn't set up its background service",
+            "T3 Code couldn't set up its background service",
+          ]);
+        }),
+    );
+
+    it.effect("never falls back next to a failed install it could not remove", () =>
+      Effect.gen(function* () {
+        const { harness, layer } = yield* makeHarness({
+          // Continue without it, then quit when the leftover will not start.
+          dialogResponses: [1, 1],
+          onCommand: (args, current) =>
+            args.startsWith("service install")
+              ? installUnit(current).pipe(
+                  Effect.as({ output: "Background setup failed.", exitCode: 1 }),
+                )
+              : Effect.succeed({ output: "Could not stop it.", exitCode: 1 }),
+        });
+
+        const outcome = yield* Effect.gen(function* () {
+          const service = yield* DesktopBackgroundService.DesktopBackgroundService;
+          return yield* service.adopt(yield* service.decide);
+        }).pipe(Effect.provide(layer));
+
+        assert.equal(outcome, "quit");
+        assert.deepEqual(harness.dialogs, [
+          "T3 Code couldn't set up its background service",
+          "T3 Code couldn't start its background service",
+        ]);
+      }),
+    );
+
     it.effect("starts a stopped installed service and adopts it as the local environment", () =>
       Effect.gen(function* () {
         const { harness, layer } = yield* makeHarness({
           onCommand: (args, current) =>
             args.startsWith("service start")
               ? writeRuntimeState(current).pipe(Effect.as({ output: "Started.", exitCode: 0 }))
-              : Effect.succeed({ output: issuedSessionOutput("token-1"), exitCode: 0 }),
+              : succeed(issuedSessionOutput("token-1")),
         });
         yield* installUnit(harness);
 
@@ -204,8 +381,8 @@ describe("DesktopBackgroundService", () => {
         }).pipe(Effect.provide(layer));
 
         assert.deepEqual(harness.commands, [
-          `service start --base-dir ${harness.home}/.t3`,
-          `auth session issue --base-dir ${harness.home}/.t3 --label T3 Code Desktop --json`,
+          `service start --base-dir ${baseDirOf(harness)}`,
+          `auth session issue --base-dir ${baseDirOf(harness)} --label T3 Code Desktop --json`,
         ]);
         const fs = yield* FileSystem.FileSystem;
         const session = yield* fs.stat(`${harness.stateDir}/desktop-service-session.json`);
@@ -216,7 +393,8 @@ describe("DesktopBackgroundService", () => {
     it.effect("reuses the stored session on the next launch instead of issuing another", () =>
       Effect.gen(function* () {
         const { harness, layer } = yield* makeHarness({
-          onCommand: () => Effect.succeed({ output: issuedSessionOutput("token-1"), exitCode: 0 }),
+          onCommand: () => succeed(issuedSessionOutput("token-1")),
+          shipsRuntime: false,
         });
         yield* writeRuntimeState(harness);
         const launch = Effect.gen(function* () {
@@ -234,21 +412,15 @@ describe("DesktopBackgroundService", () => {
     it.effect("never stops, restarts or cleans up an adopted server when the app quits", () =>
       Effect.gen(function* () {
         const { harness, layer } = yield* makeHarness({
-          onCommand: () => Effect.succeed({ output: issuedSessionOutput("token-1"), exitCode: 0 }),
+          onCommand: () => succeed(issuedSessionOutput("token-1")),
         });
-        yield* installUnit(harness);
-        yield* writeRuntimeState(harness);
+        yield* serviceRunning(harness);
 
         yield* Effect.gen(function* () {
           const service = yield* DesktopBackgroundService.DesktopBackgroundService;
           assert.equal(yield* service.adopt(yield* service.decide), "adopted");
-          yield* service.reportAgentActivity({ running: 2, continuesAfterRestart: false });
+          yield* service.state;
           harness.commands.length = 0;
-
-          // The quit path: no prompt while agents run on the service, and the
-          // post-shutdown hook has nothing to hand over.
-          assert.isTrue(yield* service.confirmQuit);
-          yield* service.startAfterShutdown;
         }).pipe(Effect.provide(layer));
 
         // Closing the layer scope ended the app's own fibers; nothing reached
@@ -261,75 +433,133 @@ describe("DesktopBackgroundService", () => {
       }),
     );
 
-    it.effect("hands running agents over only after the embedded backend has stopped", () =>
+    it.effect("stages the app's server for an older service and reports the update ready", () =>
       Effect.gen(function* () {
-        const { harness, layer } = yield* makeHarness({ dialogResponses: [0] });
-
-        yield* Effect.gen(function* () {
-          const service = yield* DesktopBackgroundService.DesktopBackgroundService;
-          assert.deepEqual(yield* service.decide, { _tag: "Embed" });
-          yield* service.reportAgentActivity({ running: 1, continuesAfterRestart: true });
-
-          assert.isTrue(yield* service.confirmQuit);
-          // Installed without starting: the embedded backend still owns the home.
-          assert.deepEqual(harness.commands, [
-            `service install --base-dir ${harness.home}/.t3 --no-start`,
-          ]);
-
-          yield* service.startAfterShutdown;
-          assert.deepEqual(cli(harness, "service start"), [
-            `service start --base-dir ${harness.home}/.t3`,
-          ]);
-        }).pipe(Effect.provide(layer));
-        assert.deepEqual(harness.dialogs, [
-          "Agents stop when T3 Code closes. Keep them running in the background?",
-        ]);
-      }),
-    );
-
-    it.effect("asks for lingering with the exact command and retries when done", () =>
-      Effect.gen(function* () {
-        let attempts = 0;
         const { harness, layer } = yield* makeHarness({
-          // Install, then "Done, retry".
-          dialogResponses: [0, 0],
-          onCommand: () =>
-            Effect.sync(() => {
-              attempts += 1;
-              return attempts === 1
-                ? {
-                    output:
-                      '[linger-disabled] Lingering is disabled. Run `sudo loginctl enable-linger "$(id -un)"`.',
-                    exitCode: 1,
-                  }
-                : { output: "Installed.", exitCode: 0 };
-            }),
+          serverVersion: "0.0.1",
+          onCommand: (args) =>
+            args.includes("auth session issue")
+              ? succeed(issuedSessionOutput("token-1"))
+              : succeed(`Staged t3@${serverPackageJson.version}.`),
         });
+        yield* serviceRunning(harness);
+        // An older service mints with its own runtime.
+        const fs = yield* FileSystem.FileSystem;
+        yield* fs.makeDirectory(`${baseDirOf(harness)}/runtime/versions/0.0.1`, {
+          recursive: true,
+        });
+        yield* fs.writeFileString(`${baseDirOf(harness)}/runtime/versions/0.0.1/t3`, "");
 
         yield* Effect.gen(function* () {
           const service = yield* DesktopBackgroundService.DesktopBackgroundService;
-          yield* service.reportAgentActivity({ running: 1, continuesAfterRestart: false });
-          assert.isTrue(yield* service.confirmQuit);
+          assert.equal(yield* service.adopt(yield* service.decide), "adopted");
+          const state = yield* service.state;
+          assert.deepEqual(state.update, {
+            status: "ready",
+            targetVersion: serverPackageJson.version,
+          });
+          assert.equal(state.serverVersion, "0.0.1");
         }).pipe(Effect.provide(layer));
 
-        assert.equal(cli(harness, "service install").length, 2);
-        assert.deepEqual(harness.dialogs, [
-          "Agents stop when T3 Code closes. Keep them running in the background?",
-          "Allow T3 Code to keep running after you log out",
+        assert.deepEqual(cli(harness, "service"), [
+          `service stage --base-dir ${baseDirOf(harness)} --runtime-archive ${harness.runtimeArchive}`,
         ]);
       }),
     );
 
-    it.effect("cancelling the quit prompt keeps the app and installs nothing", () =>
+    it.effect.each([
+      { name: "on the app's version", serverVersion: serverPackageJson.version },
+      { name: "newer than the app", serverVersion: "999.0.0" },
+    ])("leaves a service $name alone", ({ serverVersion }) =>
       Effect.gen(function* () {
-        const { harness, layer } = yield* makeHarness({ dialogResponses: [2] });
+        const { harness, layer } = yield* makeHarness({
+          serverVersion,
+          onCommand: () => succeed(issuedSessionOutput("token-1")),
+        });
+        yield* serviceRunning(harness);
+        const fs = yield* FileSystem.FileSystem;
+        yield* fs.makeDirectory(`${baseDirOf(harness)}/runtime/versions/${serverVersion}`, {
+          recursive: true,
+        });
+        yield* fs.writeFileString(`${baseDirOf(harness)}/runtime/versions/${serverVersion}/t3`, "");
+
         yield* Effect.gen(function* () {
           const service = yield* DesktopBackgroundService.DesktopBackgroundService;
-          yield* service.reportAgentActivity({ running: 1, continuesAfterRestart: false });
-          assert.isFalse(yield* service.confirmQuit);
-          yield* service.startAfterShutdown;
+          assert.equal(yield* service.adopt(yield* service.decide), "adopted");
+          assert.deepEqual((yield* service.state).update, { status: "none" });
         }).pipe(Effect.provide(layer));
-        assert.deepEqual(harness.commands, []);
+
+        assert.deepEqual(cli(harness, "service"), []);
+      }),
+    );
+
+    it.effect("reports a missing linger with the command that enables it", () =>
+      Effect.gen(function* () {
+        const { layer, harness } = yield* makeHarness({
+          onCommand: (args) =>
+            args.startsWith("loginctl show-user")
+              ? succeed("no\n")
+              : succeed(issuedSessionOutput("token-1")),
+        });
+        yield* serviceRunning(harness);
+        yield* Effect.gen(function* () {
+          const service = yield* DesktopBackgroundService.DesktopBackgroundService;
+          assert.equal(yield* service.adopt(yield* service.decide), "adopted");
+          const state = yield* service.state;
+          assert.match(state.lingerCommand ?? "", /^sudo loginctl enable-linger \S+$/);
+        }).pipe(Effect.provide(layer));
+      }),
+    );
+
+    it.effect("opting out removes the service and the next launch runs its own backend", () =>
+      Effect.gen(function* () {
+        const { harness, layer } = yield* makeHarness({
+          onCommand: (args, current) =>
+            args.startsWith("service uninstall")
+              ? serviceRemoved(current).pipe(Effect.as({ output: "Removed.", exitCode: 0 }))
+              : succeed(issuedSessionOutput("token-1")),
+        });
+        yield* serviceRunning(harness);
+
+        yield* Effect.gen(function* () {
+          const service = yield* DesktopBackgroundService.DesktopBackgroundService;
+          const settings = yield* DesktopAppSettings.DesktopAppSettings;
+          assert.equal(yield* service.adopt(yield* service.decide), "adopted");
+
+          yield* service.setEnabled(false);
+          assert.isTrue((yield* settings.get).backgroundServiceDisabled);
+          assert.deepEqual(yield* service.decide, { _tag: "Embed" });
+
+          // The way back: the next launch installs it again before any backend starts.
+          yield* service.setEnabled(true);
+          assert.isFalse((yield* settings.get).backgroundServiceDisabled);
+          assert.deepEqual(yield* service.decide, { _tag: "InstallService" });
+        }).pipe(Effect.provide(layer));
+
+        assert.deepEqual(cli(harness, "service"), [
+          `service uninstall --base-dir ${baseDirOf(harness)}`,
+        ]);
+      }),
+    );
+
+    it.effect("keeps the opt-out unrecorded when the service cannot be removed", () =>
+      Effect.gen(function* () {
+        const { harness, layer } = yield* makeHarness({
+          onCommand: (args) =>
+            args.startsWith("service uninstall")
+              ? Effect.succeed({ output: "Background setup failed.", exitCode: 1 })
+              : succeed(issuedSessionOutput("token-1")),
+        });
+        yield* serviceRunning(harness);
+        yield* Effect.gen(function* () {
+          const service = yield* DesktopBackgroundService.DesktopBackgroundService;
+          assert.equal(yield* service.adopt(yield* service.decide), "adopted");
+          const error = yield* service.setEnabled(false).pipe(Effect.flip);
+          assert.equal(error._tag, "DesktopBackgroundServiceCliError");
+          assert.isFalse(
+            (yield* (yield* DesktopAppSettings.DesktopAppSettings).get).backgroundServiceDisabled,
+          );
+        }).pipe(Effect.provide(layer));
       }),
     );
 
@@ -354,6 +584,68 @@ describe("DesktopBackgroundService", () => {
           "T3 Code couldn't start its background service",
           "T3 Code couldn't start its background service",
         ]);
+      }),
+    );
+  });
+});
+
+describe("linkLauncher", () => {
+  it.layer(NodeServices.layer)((it) => {
+    const setup = Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const home = yield* fs.makeTempDirectoryScoped({ prefix: "t3-launcher-" });
+      const versionsDir = path.join(home, ".t3", "runtime", "versions");
+      const runtime = (version: string) => path.join(versionsDir, version, "t3");
+      for (const version of ["1.0.0", "1.1.0"]) {
+        yield* fs.makeDirectory(path.dirname(runtime(version)), { recursive: true });
+        yield* fs.writeFileString(runtime(version), "");
+      }
+      const launcherPath = path.join(home, ".local", "bin", "t3");
+      return { fs, path, home, versionsDir, runtime, launcherPath };
+    });
+
+    it.effect("creates a missing launcher and moves one it owns to the service's version", () =>
+      Effect.gen(function* () {
+        const { fs, versionsDir, runtime, launcherPath } = yield* setup;
+        const link = (target: string) =>
+          DesktopBackgroundService.linkLauncher({ launcherPath, versionsDir, target });
+
+        assert.equal(yield* link(runtime("1.0.0")), "linked");
+        assert.equal(yield* fs.readLink(launcherPath), runtime("1.0.0"));
+        assert.equal(yield* link(runtime("1.0.0")), "unchanged");
+        assert.equal(yield* link(runtime("1.1.0")), "linked");
+        assert.equal(yield* fs.readLink(launcherPath), runtime("1.1.0"));
+      }),
+    );
+
+    it.effect("leaves a t3 that is not the install script's alone", () =>
+      Effect.gen(function* () {
+        const { fs, path, home, versionsDir, runtime, launcherPath } = yield* setup;
+        yield* fs.makeDirectory(path.dirname(launcherPath), { recursive: true });
+        const npmBin = path.join(home, ".local", "lib", "node_modules", "t3", "bin.js");
+        yield* fs.symlink(npmBin, launcherPath);
+        assert.equal(
+          yield* DesktopBackgroundService.linkLauncher({
+            launcherPath,
+            versionsDir,
+            target: runtime("1.1.0"),
+          }),
+          "foreign",
+        );
+        assert.equal(yield* fs.readLink(launcherPath), npmBin);
+
+        yield* fs.remove(launcherPath);
+        yield* fs.writeFileString(launcherPath, "#!/bin/sh\n");
+        assert.equal(
+          yield* DesktopBackgroundService.linkLauncher({
+            launcherPath,
+            versionsDir,
+            target: runtime("1.1.0"),
+          }),
+          "foreign",
+        );
+        assert.equal(yield* fs.readFileString(launcherPath), "#!/bin/sh\n");
       }),
     );
   });

@@ -31,9 +31,11 @@ export const SET_LOCAL_ENVIRONMENT_ENABLED_CHANNEL = "desktop:set-local-environm
 export const GET_LOCAL_ENVIRONMENT_BEARER_TOKEN_CHANNEL =
   "desktop:get-local-environment-bearer-token";
 export const GET_BACKGROUND_SERVICE_STATE_CHANNEL = "desktop:get-background-service-state";
-export const INSTALL_BACKGROUND_SERVICE_CHANNEL = "desktop:install-background-service";
-export const UNINSTALL_BACKGROUND_SERVICE_CHANNEL = "desktop:uninstall-background-service";
-export const REPORT_AGENT_ACTIVITY_CHANNEL = "desktop:report-agent-activity";
+export const TAKE_BACKGROUND_SERVICE_INSTALL_NOTICE_CHANNEL =
+  "desktop:take-background-service-install-notice";
+export const RESTART_BACKGROUND_SERVICE_CHANNEL = "desktop:restart-background-service";
+export const OPEN_BACKGROUND_SERVICE_LOGS_CHANNEL = "desktop:open-background-service-logs";
+export const SET_BACKGROUND_SERVICE_ENABLED_CHANNEL = "desktop:set-background-service-enabled";
 export const GET_CLIENT_SETTINGS_CHANNEL = "desktop:get-client-settings";
 export const SET_CLIENT_SETTINGS_CHANNEL = "desktop:set-client-settings";
 export const SETUP_SNAP_SHOT_CHANNEL = "desktop:setup-snap-shot";
