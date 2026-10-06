@@ -1153,27 +1153,6 @@ function ScheduledTaskEditorDialog({
                       "Each request runs the prompt. Use {{body.path}}, {{headers.name}}, {{query.name}}, {{body}} or {{request}} in the prompt; only what it names reaches the agent."
                     }
                   </p>
-                  <Field
-                    label="Skip requests older than"
-                    hint="minutes, optional"
-                    htmlFor="scheduled-task-max-age"
-                  >
-                    <Input
-                      id="scheduled-task-max-age"
-                      type="number"
-                      nativeInput
-                      min={1}
-                      max={MAX_WEBHOOK_DELIVERY_AGE_MINUTES}
-                      placeholder="Run every request"
-                      value={draft.maxDeliveryAgeMinutes}
-                      onChange={(event) =>
-                        setDraft((current) => ({
-                          ...current,
-                          maxDeliveryAgeMinutes: event.target.value,
-                        }))
-                      }
-                    />
-                  </Field>
                   <div className="flex items-center justify-between gap-4">
                     <div className="min-w-0 space-y-1">
                       <Label htmlFor="scheduled-task-signature">Require signature</Label>
