@@ -94,8 +94,18 @@ function makeTestService(serviceStatus: BootService.BootServiceStatus) {
   const installOptions: Array<Parameters<BootService.BootService["Service"]["install"]>[0]> = [];
   const restarts: Array<true> = [];
   const starts: Array<true> = [];
+  const stages: Array<Parameters<BootService.BootService["Service"]["stage"]>[0]> = [];
   const service = BootService.BootService.of({
     status: Effect.succeed(serviceStatus),
+    stage: (options) =>
+      Effect.sync(() => {
+        stages.push(options);
+        return {
+          versionDir: "/test/t3/runtime/versions/1.0.0",
+          entryPath: "/test/t3/runtime/versions/1.0.0/t3",
+          sentinelPath: "/test/t3/runtime/versions/1.0.0/.install-complete",
+        };
+      }),
     restart: Effect.sync(() => {
       restarts.push(true);
       return serviceStatus.installed;
@@ -116,7 +126,7 @@ function makeTestService(serviceStatus: BootService.BootServiceStatus) {
       }),
     uninstall: Effect.succeed(false),
   });
-  return { service, installOptions, restarts, starts };
+  return { service, installOptions, restarts, starts, stages };
 }
 
 it.layer(Layer.mergeAll(NodeServices.layer, NetService.layer))("service commands", (it) => {
@@ -190,6 +200,34 @@ it.layer(Layer.mergeAll(NodeServices.layer, NetService.layer))("service commands
       );
 
       expect(installOptions).toEqual([{ allowDowngrade: false, start: false }]);
+    }),
+  );
+
+  it.effect("install and stage take the runtime from a local archive", () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const baseDir = yield* fs.makeTempDirectoryScoped({ prefix: "t3-service-cli-test-" });
+      const { service, installOptions, stages } = makeTestService({
+        ...status,
+        installed: false,
+        current: false,
+      });
+      vi.spyOn(BootService, "layer").mockReturnValue(
+        Layer.succeed(BootService.BootService, service),
+      );
+      const run = (args: ReadonlyArray<string>) =>
+        Command.runWith(serviceCommand, { version: packageJson.version })(args).pipe(
+          Effect.provideService(HostProcessEnvironment, {}),
+          Effect.provide(ConfigProvider.layer(ConfigProvider.fromEnv({ env: {} }))),
+        );
+
+      yield* run(["install", "--base-dir", baseDir, "--runtime-archive", "/app/t3-runtime.tar.gz"]);
+      yield* run(["stage", "--base-dir", baseDir, "--runtime-archive", "/app/t3-runtime.tar.gz"]);
+
+      expect(installOptions).toEqual([
+        { allowDowngrade: false, runtimeArchive: "/app/t3-runtime.tar.gz" },
+      ]);
+      expect(stages).toEqual([{ runtimeArchive: "/app/t3-runtime.tar.gz" }]);
     }),
   );
 
