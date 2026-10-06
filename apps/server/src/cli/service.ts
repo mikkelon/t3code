@@ -1,6 +1,7 @@
 import * as Console from "effect/Console";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
+import * as Option from "effect/Option";
 import { Command, Flag, GlobalFlag } from "effect/cli";
 import { FetchHttpClient } from "effect/http";
 
@@ -34,10 +35,12 @@ export type ServiceReconcileResult =
     };
 
 /** Install, update, or repair the service using the CLI version running this command. */
-export const reconcileService = Effect.fn("cli.service.reconcile")(function* (options?: {
-  readonly allowDowngrade?: boolean;
-  readonly start?: boolean;
-}) {
+export const reconcileService = Effect.fn("cli.service.reconcile")(function* (
+  options?: BootService.BootServiceRuntimeOptions & {
+    readonly allowDowngrade?: boolean;
+    readonly start?: boolean;
+  },
+) {
   const service = yield* BootService.BootService;
   const status = yield* service.status;
   if (status.installed && status.current) {
@@ -124,8 +127,16 @@ const serviceReconcileFlags = {
   ),
 };
 
+const runtimeArchiveFlag = Flag.String("runtime-archive").pipe(
+  Flag.withDescription(
+    "Unpack this t3 release archive for this version instead of downloading it, for example the one the desktop app ships.",
+  ),
+  Flag.optional,
+);
+
 const serviceInstallCommand = Command.make("install", {
   ...serviceReconcileFlags,
+  runtimeArchive: runtimeArchiveFlag,
   noStart: Flag.Boolean("no-start").pipe(
     Flag.withDescription(
       "Prepare the runtime and unit without starting the service; `t3 service start` starts it.",
@@ -140,6 +151,7 @@ const serviceInstallCommand = Command.make("install", {
       Effect.gen(function* () {
         const result = yield* reconcileService({
           allowDowngrade: flags.allowDowngrade,
+          runtimeArchive: Option.getOrUndefined(flags.runtimeArchive),
           ...(flags.noStart ? { start: false } : {}),
         });
         if (!result.changed) {
@@ -177,6 +189,26 @@ const serviceUpdateCommand = Command.make("update", serviceReconcileFlags).pipe(
         yield* Console.log(
           `${result.previouslyInstalled ? "Updated" : "Installed"} T3 Code service with t3@${packageJson.version}.\nLogs: ${result.plan.logPath}`,
         );
+      }),
+    ),
+  ),
+);
+
+const serviceStageCommand = Command.make("stage", {
+  ...projectLocationFlags,
+  runtimeArchive: runtimeArchiveFlag,
+}).pipe(
+  Command.withDescription(
+    "Put this t3 version under the T3 home's runtime without touching the service, so switching the service to it later needs no download.",
+  ),
+  Command.withHandler((flags) =>
+    runServiceCommand(
+      flags,
+      Effect.gen(function* () {
+        const runtime = yield* (yield* BootService.BootService).stage({
+          runtimeArchive: Option.getOrUndefined(flags.runtimeArchive),
+        });
+        yield* Console.log(`Staged t3@${packageJson.version} at ${runtime.versionDir}.`);
       }),
     ),
   ),
@@ -253,6 +285,7 @@ export const serviceCommand = Command.make("service").pipe(
   Command.withSubcommands([
     serviceInstallCommand,
     serviceRestartCommand,
+    serviceStageCommand,
     serviceStartCommand,
     serviceUninstallCommand,
     serviceStatusCommand,
