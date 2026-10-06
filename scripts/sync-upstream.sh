@@ -4,7 +4,10 @@
 # never moves main and never pushes. See docs/operations/fork-sync.md.
 #
 #   scripts/sync-upstream.sh [--branch <fork-branch>] [--skip-checks]
-#   scripts/sync-upstream.sh --checks-only   # after finishing a stopped rebase
+#   scripts/sync-upstream.sh [--branch <fork-branch>] --checks-only   # after finishing a stopped rebase
+#
+# Both modes warn when the result changes ORCHESTRATION_PROTOCOL_VERSION
+# compared with <fork-branch> (default: main).
 #
 # Environment:
 #   T3CODE_UPSTREAM_URL  upstream repository (default: https://github.com/pingdotgg/t3code)
@@ -23,7 +26,7 @@ while [[ $# -gt 0 ]]; do
     --branch) fork_branch="${2:?--branch needs a value}"; shift 2 ;;
     --skip-checks) run_checks=false; shift ;;
     --checks-only) mode="checks"; shift ;;
-    -h | --help) sed -n '2,11p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    -h | --help) sed -n '2,14p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *) echo "sync-upstream: unknown argument $1" >&2; exit 64 ;;
   esac
 done
@@ -32,6 +35,47 @@ say() { printf '\n==> %s\n' "$*"; }
 die() { printf '\nsync-upstream: %s\n' "$*" >&2; exit 1; }
 rebase_in_progress() {
   [[ -d "$(git rev-parse --git-path rebase-merge)" || -d "$(git rev-parse --git-path rebase-apply)" ]]
+}
+
+protocol_file="packages/contracts/src/environment.ts"
+
+# Prints the ORCHESTRATION_PROTOCOL_VERSION at a revision, or nothing.
+protocol_version_at() {
+  git show "$1:${protocol_file}" 2>/dev/null |
+    sed -n 's/^export const ORCHESTRATION_PROTOCOL_VERSION = \([0-9][0-9]*\);.*/\1/p' | head -n 1
+}
+
+# Clients and servers on different orchestration protocols refuse each other.
+# The official mobile app follows upstream's releases, so a bump here can lock
+# it out of every server this fork builds until the store app catches up.
+check_protocol_version() {
+  local before after
+  before="$(protocol_version_at "$fork_branch")"
+  after="$(protocol_version_at HEAD)"
+  if [[ -z "$before" || -z "$after" ]]; then
+    {
+      printf '\n!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!\n'
+      printf '!! Could not read ORCHESTRATION_PROTOCOL_VERSION from %s\n' "$protocol_file"
+      printf '!! on %s (%s) or HEAD (%s). Check the wire protocol by hand.\n' \
+        "$fork_branch" "${before:-missing}" "${after:-missing}"
+      printf '!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!\n'
+    } >&2
+    return
+  fi
+  if [[ "$before" == "$after" ]]; then
+    say "Orchestration protocol: ${after} (unchanged from ${fork_branch})"
+    return
+  fi
+  {
+    printf '\n!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!\n'
+    printf '!! WARNING: ORCHESTRATION_PROTOCOL_VERSION changes from %s to %s.\n' "$before" "$after"
+    printf '!!\n'
+    printf '!! Servers built from this sync refuse clients on protocol %s. The\n' "$before"
+    printf '!! official App Store / Google Play app follows upstream releases and may\n'
+    printf '!! stop connecting ("Client not supported") until it speaks protocol %s.\n' "$after"
+    printf '!! Desktop and web from the same fork release are not affected.\n'
+    printf '!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!\n'
+  } >&2
 }
 
 # Typecheck the packages the fork touches, then run the tests beside every
@@ -75,6 +119,7 @@ rebase_in_progress && die "a rebase is in progress; finish it ('git rebase --con
 
 if [[ "$mode" == "checks" ]]; then
   git rev-parse -q --verify "refs/remotes/${target}" >/dev/null || die "${target} is not fetched yet"
+  check_protocol_version
   run_fork_checks
   say "Checks passed on $(git branch --show-current)"
   exit 0
@@ -159,6 +204,7 @@ if [[ ${#auto_resolved[@]} -gt 0 ]]; then
   printf '  kept deleted (the fork removed them, upstream changed them):\n'
   printf '    %s\n' "${auto_resolved[@]}" | sort -u
 fi
+check_protocol_version
 
 if "$run_checks"; then
   run_fork_checks

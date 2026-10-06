@@ -30,6 +30,7 @@ function commitFiles(cwd: string, message: string, files: Record<string, string 
   for (const [name, contents] of Object.entries(files)) {
     if (contents === null) git(cwd, "rm", "-q", name);
     else {
+      NodeFS.mkdirSync(NodePath.dirname(NodePath.join(cwd, name)), { recursive: true });
       NodeFS.writeFileSync(NodePath.join(cwd, name), contents);
       git(cwd, "add", name);
     }
@@ -37,7 +38,11 @@ function commitFiles(cwd: string, message: string, files: Record<string, string 
   git(cwd, "commit", "-q", "-m", message);
 }
 
-/** An upstream with three files, and a fork of it that deletes one and edits another. */
+const PROTOCOL_FILE = "packages/contracts/src/environment.ts";
+const protocolSource = (version: number) =>
+  `export const ORCHESTRATION_PROTOCOL_VERSION = ${version};\n`;
+
+/** An upstream with a few files, and a fork of it that deletes one and edits another. */
 function makeRepos() {
   const root = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "t3-sync-upstream-"));
   roots.push(root);
@@ -49,6 +54,7 @@ function makeRepos() {
     "deleted-by-fork.txt": "upstream\n",
     "edited-by-fork.txt": "one\ntwo\nthree\n",
     "untouched.txt": "same\n",
+    [PROTOCOL_FILE]: protocolSource(2),
   });
   git(root, "clone", "-q", upstream, fork);
   commitFiles(fork, "fork: remove a leaf", { "deleted-by-fork.txt": null });
@@ -88,6 +94,21 @@ describe.skipIf(HostProcessPlatform.defaultValue() === "win32")("sync-upstream.s
     expect(NodeFS.existsSync(NodePath.join(fork, "deleted-by-fork.txt"))).toBe(false);
     expect(NodeFS.readFileSync(NodePath.join(fork, "added-upstream.txt"), "utf8")).toBe("new\n");
     expect(git(fork, "remote", "get-url", "--push", "upstream")).toBe("DISABLED");
+    expect(result.stdout).toContain("Orchestration protocol: 2 (unchanged from main)");
+    expect(result.stderr).not.toContain("ORCHESTRATION_PROTOCOL_VERSION");
+  });
+
+  it("warns loudly when the sync changes the orchestration protocol", () => {
+    const { upstream, fork } = makeRepos();
+    commitFiles(upstream, "upstream: bump the wire protocol", {
+      [PROTOCOL_FILE]: protocolSource(3),
+    });
+
+    const result = runSync(fork, upstream);
+
+    expect(result.status, result.stdout + result.stderr).toBe(0);
+    expect(result.stderr).toContain("WARNING: ORCHESTRATION_PROTOCOL_VERSION changes from 2 to 3.");
+    expect(result.stderr).toContain("Client not supported");
   });
 
   it("stops on a conflict that needs a human and names the file", () => {
