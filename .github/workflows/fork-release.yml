@@ -46,7 +46,7 @@ jobs:
       version: ${{ steps.version.outputs.version }}
       tag: ${{ steps.version.outputs.tag }}
       name: ${{ steps.version.outputs.name }}
-      ref: ${{ github.sha }}
+      ref: ${{ steps.commit.outputs.sha }}
     steps:
       - name: Checkout
         uses: actions/checkout@v6
@@ -72,18 +72,23 @@ jobs:
           REQUESTED: ${{ github.event_name == 'push' && github.ref_name || inputs.version }}
         run: node scripts/resolve-fork-release.ts --requested "$REQUESTED" --github-output
 
-      # A dispatched release creates its tag on the commit it builds. An
-      # existing tag points somewhere else, and publishing to it would attach
-      # these builds to that other commit's release.
-      - name: Refuse an existing tag
-        if: github.event_name == 'workflow_dispatch'
+      # A dispatched release creates its tag on the commit it builds. When the
+      # tag already exists (re-running a release that failed to publish), the
+      # tagged commit is built instead, so the release never carries builds of
+      # another commit.
+      - id: commit
+        name: Resolve commit to build
         env:
           TAG: ${{ steps.version.outputs.tag }}
         run: |
-          if git rev-parse -q --verify "refs/tags/$TAG" >/dev/null; then
-            echo "::error::$TAG already exists. Push the tag to rebuild it, or pick another version." >&2
-            exit 1
+          set -euo pipefail
+          sha="$GITHUB_SHA"
+          if [[ "$GITHUB_EVENT_NAME" == "workflow_dispatch" ]] &&
+            tagged=$(git rev-parse -q --verify "refs/tags/$TAG^{commit}"); then
+            echo "::notice::$TAG already exists; rebuilding the commit it points to, $tagged."
+            sha="$tagged"
           fi
+          echo "sha=$sha" >> "$GITHUB_OUTPUT"
 
   # The platform-independent JS (server bundle, web client, Electron main) is
   # built once and handed to every platform job as `js-bundle`.
@@ -150,9 +155,11 @@ jobs:
           - arch: x64
             runner: ubuntu-24.04
             rust_target: x86_64-unknown-linux-gnu
+            manifest: latest-linux.yml
           - arch: arm64
             runner: ubuntu-24.04-arm
             rust_target: aarch64-unknown-linux-gnu
+            manifest: latest-linux-arm64.yml
     env:
       VERSION: ${{ needs.prepare.outputs.version }}
     steps:
@@ -231,16 +238,33 @@ jobs:
       - name: Smoke-test CLI archive
         run: node scripts/smoke-cli-archive.ts --archive release-cli/* --expect-version "$VERSION"
 
-      # builder-debug.yml is electron-builder's config dump, not a feed.
+      # Installed apps update from the manifest, which electron-builder writes
+      # only when the build has a publish config. It lists the AppImage, whose
+      # blockmap is embedded in the file itself (blockMapSize), and the .deb,
+      # which updates by full download, so Linux builds have no .blockmap files.
       - name: Collect desktop assets
+        env:
+          MANIFEST: release/${{ matrix.manifest }}
         run: |
           set -euo pipefail
           shopt -s nullglob
-          mkdir -p release-publish
-          for file in release/*.AppImage release/*.deb release/*.blockmap release/*.yml; do
-            [[ "$file" == */builder-debug.yml ]] && continue
-            cp "$file" release-publish/
+          packages=(release/*.AppImage release/*.deb)
+          if [[ ${#packages[@]} -ne 2 ]]; then
+            echo "::error::Expected one AppImage and one .deb, found: ${packages[*]}" >&2
+            exit 1
+          fi
+          if [[ ! -f "$MANIFEST" ]]; then
+            echo "::error::$MANIFEST is missing, so installed apps could not update to this release." >&2
+            exit 1
+          fi
+          for package in "${packages[@]}"; do
+            if ! grep -qF "url: ${package#release/}" "$MANIFEST"; then
+              echo "::error::$MANIFEST does not list ${package#release/}." >&2
+              exit 1
+            fi
           done
+          mkdir -p release-publish
+          cp "${packages[@]}" "$MANIFEST" release-publish/
           ls -l release-publish
 
       - name: Upload desktop assets
@@ -381,8 +405,8 @@ jobs:
           files: |
             release-assets/*.AppImage
             release-assets/*.deb
-            release-assets/*.blockmap
-            release-assets/*.yml
+            release-assets/latest-linux.yml
+            release-assets/latest-linux-arm64.yml
             release-assets/*.tar.gz
             release-assets/SHA256SUMS
           fail_on_unmatched_files: true
