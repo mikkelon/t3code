@@ -14,7 +14,7 @@ describe("webhookAddress", () => {
     });
   });
 
-  it("builds a direct URL on the environment's address without T3 Connect", () => {
+  it("builds a direct URL on the environment's address without a URL from the server", () => {
     const result = webhookAddress(endpoint(null), "https://mac.tail1234.ts.net/");
     expect(result.address).toBe(`https://mac.tail1234.ts.net${path}`);
     expect(result.copyable).toBe(true);
