@@ -109,12 +109,14 @@ contextBridge.exposeInMainWorld("desktopBridge", {
     ipcRenderer.invoke(IpcChannels.GET_LOCAL_ENVIRONMENT_BEARER_TOKEN_CHANNEL),
   getBackgroundServiceState: () =>
     ipcRenderer.invoke(IpcChannels.GET_BACKGROUND_SERVICE_STATE_CHANNEL),
-  installBackgroundService: () =>
-    ipcRenderer.invoke(IpcChannels.INSTALL_BACKGROUND_SERVICE_CHANNEL),
-  uninstallBackgroundService: () =>
-    ipcRenderer.invoke(IpcChannels.UNINSTALL_BACKGROUND_SERVICE_CHANNEL),
-  reportAgentActivity: (activity) =>
-    ipcRenderer.invoke(IpcChannels.REPORT_AGENT_ACTIVITY_CHANNEL, activity),
+  takeBackgroundServiceInstallNotice: () =>
+    ipcRenderer.invoke(IpcChannels.TAKE_BACKGROUND_SERVICE_INSTALL_NOTICE_CHANNEL),
+  restartBackgroundService: () =>
+    ipcRenderer.invoke(IpcChannels.RESTART_BACKGROUND_SERVICE_CHANNEL),
+  openBackgroundServiceLogs: () =>
+    ipcRenderer.invoke(IpcChannels.OPEN_BACKGROUND_SERVICE_LOGS_CHANNEL),
+  setBackgroundServiceEnabled: (enabled) =>
+    ipcRenderer.invoke(IpcChannels.SET_BACKGROUND_SERVICE_ENABLED_CHANNEL, enabled),
   getLocalEnvironmentEnabled: () =>
     ipcRenderer.sendSync(IpcChannels.GET_LOCAL_ENVIRONMENT_ENABLED_CHANNEL) !== false,
   setLocalEnvironmentEnabled: (enabled) =>
