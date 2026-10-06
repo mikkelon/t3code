@@ -26,15 +26,34 @@ The script:
 4. Stops with exit code 2 on any other conflict, naming the files and the fork
    commit being replayed. Resolve, `git add`, `git rebase --continue`, then run
    `scripts/sync-upstream.sh --checks-only`.
-5. Runs `vp i`, typechecks server, desktop, web, shared and scripts, and runs the
+5. Compares `ORCHESTRATION_PROTOCOL_VERSION` (in
+   `packages/contracts/src/environment.ts`) on the result with the fork branch
+   and prints a loud warning when it changed. See
+   [Wire protocol changes](#wire-protocol-changes). `--checks-only` repeats this
+   check after a stopped rebase, so run it before adopting.
+6. Runs `vp i`, typechecks server, desktop, web, shared and scripts, and runs the
    test files next to every file the fork changes. `--skip-checks` skips this.
-6. Prints the commands to inspect, adopt (`git reset --hard sync/<date>` on
+7. Prints the commands to inspect, adopt (`git reset --hard sync/<date>` on
    `main`) and push (`git push --force-with-lease origin main`). It never pushes.
 
 Use `git range-diff` from the printed commands to compare the stack before and
 after; it shows exactly how each fork commit changed during the rebase. Enabling
 `git config rerere.enabled true` lets git replay conflict resolutions you made in
 earlier syncs.
+
+## Wire protocol changes
+
+Clients and servers refuse each other when their orchestration protocol versions
+differ. Desktop and web ship with each fork release, so they always match. The
+official App Store and Google Play app does not: it follows upstream's releases,
+so a protocol bump in a sync can lock the phone out of every fork server, which
+then shows **Client not supported**.
+
+When the script prints the warning, decide before adopting whether the release
+is worth losing the phone until the store app speaks the new protocol. As of
+`v0.0.46-mk.2` the fork is on protocol 2 and the store app still speaks 1, so the
+phone already shows **Client not supported**; it starts working again once the
+store app ships protocol 2.
 
 After adopting a sync, cut a release from the Actions tab (**Fork release**,
 see [Maintaining the fork](../../README.md#maintaining-the-fork)) so installed
