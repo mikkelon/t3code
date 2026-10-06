@@ -53,7 +53,7 @@ export function decideLocalServer(input: {
 }
 
 /** Signal 0 only checks that the pid exists; EPERM means it exists for another user. */
-export function isProcessAlive(pid: number): boolean {
+function isProcessAlive(pid: number): boolean {
   try {
     process.kill(pid, 0);
     return true;
