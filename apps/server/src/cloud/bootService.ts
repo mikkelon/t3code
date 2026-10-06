@@ -31,6 +31,7 @@ import {
   pinnedRuntimeCommand,
   pinnedRuntimePaths,
   PinnedRuntimeInstallError,
+  type PinnedRuntimePaths,
 } from "./pinnedRuntime.ts";
 import {
   SERVICE_LAUNCHER_PROTOCOL,
@@ -552,18 +553,36 @@ export interface BootServiceStatus {
   readonly logPath: string;
 }
 
+export interface BootServiceRuntimeOptions {
+  /**
+   * Unpack this release archive instead of downloading one. The desktop app
+   * passes the archive it ships, so the service runs the app's own version
+   * without a network.
+   */
+  readonly runtimeArchive?: string | undefined;
+}
+
 export class BootService extends Context.Service<
   BootService,
   {
-    readonly install: (options?: {
-      readonly allowDowngrade?: boolean;
-      /**
-       * Write the unit for this version but leave the service on whatever it
-       * is running now. `t3 update` uses this when the user declines the
-       * restart, so a later `t3 service restart` lands on the new version.
-       */
-      readonly start?: boolean;
-    }) => Effect.Effect<BootServicePlan, BootServiceError>;
+    /**
+     * Puts this version's runtime under `<baseDir>/runtime/versions` without
+     * touching the service. Resolves at once when it is already there.
+     */
+    readonly stage: (
+      options?: BootServiceRuntimeOptions,
+    ) => Effect.Effect<PinnedRuntimePaths, BootServiceError>;
+    readonly install: (
+      options?: BootServiceRuntimeOptions & {
+        readonly allowDowngrade?: boolean;
+        /**
+         * Write the unit for this version but leave the service on whatever it
+         * is running now. `t3 update` uses this when the user declines the
+         * restart, so a later `t3 service restart` lands on the new version.
+         */
+        readonly start?: boolean;
+      },
+    ) => Effect.Effect<BootServicePlan, BootServiceError>;
     /**
      * Stop and start the installed service on the version its unit names.
      * Only when the unit serves this base dir: the unit name is per user, so
@@ -778,22 +797,10 @@ export const make = Effect.fn("cloud.boot_service.make")(function* (input: {
     ]).pipe(Effect.ignore);
   });
 
-  const install = Effect.fn("cloud.boot_service.install")(function* (options?: {
-    readonly allowDowngrade?: boolean;
-    readonly start?: boolean;
-  }) {
-    const manager = yield* requireManager;
-    yield* fs
-      .makeDirectory(input.logsDir, { recursive: true })
-      .pipe(Effect.mapError((cause) => new BootServiceInstallError({ cause })));
-
-    // A permissions failure must not leave a partial install or stop a working server.
-    if (manager.kind === "systemd") {
-      yield* requireSystemdPrerequisites.pipe(Effect.tapError(logFailure));
-    }
-
-    // Prepare every immutable artifact before stopping the installed unit.
-    yield* ensurePinnedRuntimeInstalled({
+  const stage = Effect.fn("cloud.boot_service.stage")(function* (
+    options?: BootServiceRuntimeOptions,
+  ) {
+    return yield* ensurePinnedRuntimeInstalled({
       baseDir: input.baseDir,
       version: input.cliVersion,
       fs,
@@ -803,6 +810,7 @@ export const make = Effect.fn("cloud.boot_service.make")(function* (input: {
       platform,
       arch,
       releaseBaseUrl,
+      localArchive: options?.runtimeArchive,
       validate: (runtime) =>
         runner
           .run({
@@ -845,6 +853,26 @@ export const make = Effect.fn("cloud.boot_service.make")(function* (input: {
           : new BootServiceInstallError({ cause: error }),
       ),
     );
+  });
+
+  const install = Effect.fn("cloud.boot_service.install")(function* (
+    options?: BootServiceRuntimeOptions & {
+      readonly allowDowngrade?: boolean;
+      readonly start?: boolean;
+    },
+  ) {
+    const manager = yield* requireManager;
+    yield* fs
+      .makeDirectory(input.logsDir, { recursive: true })
+      .pipe(Effect.mapError((cause) => new BootServiceInstallError({ cause })));
+
+    // A permissions failure must not leave a partial install or stop a working server.
+    if (manager.kind === "systemd") {
+      yield* requireSystemdPrerequisites.pipe(Effect.tapError(logFailure));
+    }
+
+    // Prepare every immutable artifact before stopping the installed unit.
+    yield* stage(options);
     const installed = yield* fs
       .exists(unitPath)
       .pipe(Effect.mapError((cause) => new BootServiceInstallError({ cause })));
@@ -1031,7 +1059,7 @@ export const make = Effect.fn("cloud.boot_service.make")(function* (input: {
     Effect.withSpan("cloud.boot_service.status"),
   );
 
-  return BootService.of({ install, restart, start, uninstall, status });
+  return BootService.of({ stage, install, restart, start, uninstall, status });
 });
 
 export const layer = (input: {
