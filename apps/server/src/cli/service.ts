@@ -99,6 +99,14 @@ export function formatServiceStatus(
   ].join("\n");
 }
 
+/** Problems that leave the service working, such as a missing linger. */
+const logServiceWarnings = Effect.gen(function* () {
+  const status = yield* (yield* BootService.BootService).status;
+  for (const problem of (status.problems ?? []).filter(BootService.isBootServiceWarning)) {
+    yield* Console.log(`Warning: [${problem}] ${BootService.formatBootServiceProblem(problem)}`);
+  }
+});
+
 const runServiceCommand = Effect.fn("cli.service.run")(function* <A, E>(
   flags: { readonly baseDir: Parameters<typeof resolveCliAuthConfig>[0]["baseDir"] },
   run: Effect.Effect<A, E, BootService.BootService>,
@@ -138,11 +146,12 @@ const serviceInstallCommand = Command.make("install", {
           yield* Console.log(
             `T3 Code service is already installed with t3@${packageJson.version}.`,
           );
-          return;
+        } else {
+          yield* Console.log(
+            `${result.previouslyInstalled ? "Updated" : "Installed"} T3 Code service with t3@${packageJson.version}.\nLogs: ${result.plan.logPath}`,
+          );
         }
-        yield* Console.log(
-          `${result.previouslyInstalled ? "Updated" : "Installed"} T3 Code service with t3@${packageJson.version}.\nLogs: ${result.plan.logPath}`,
-        );
+        yield* logServiceWarnings;
       }),
     ),
   ),

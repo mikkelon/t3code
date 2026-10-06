@@ -471,15 +471,23 @@ const BootServiceProblem = Schema.Literals([
 ]);
 type BootServiceProblem = typeof BootServiceProblem.Type;
 
+/**
+ * Lingering only decides whether the service outlives the login session, so
+ * it is reported but never blocks an install or makes a service out of date.
+ */
+export function isBootServiceWarning(problem: BootServiceProblem): boolean {
+  return problem === "linger-disabled" || problem === "linger-unavailable";
+}
+
 /** These codes and recovery steps are documented in docs/user/background-service.md. */
 export function formatBootServiceProblem(problem: BootServiceProblem): string {
   switch (problem) {
     case "user-manager-unavailable":
       return "Cannot reach the systemd user manager. Run `systemctl --user status` in a login session for the service user. Install your distribution's systemd user-session support if it is missing; do not run T3 with sudo.";
     case "linger-unavailable":
-      return 'Cannot check whether this user can run services after logout. Run `loginctl show-user "$(id -un)" --property=Linger` and check that systemd-logind is available.';
+      return 'Cannot check whether this user can run services after logout, so T3 Code may stop when your last login session ends. Run `loginctl show-user "$(id -un)" --property=Linger` and check that systemd-logind is available.';
     case "linger-disabled":
-      return 'Lingering is disabled. T3 Code will stop when your last login session ends and will not start at boot. Run `sudo loginctl enable-linger "$(id -un)"` on this machine, then retry the service command as your normal user.';
+      return 'Lingering is disabled, so T3 Code runs while you are logged in, stops when your last login session ends, and does not start at boot. To keep it running, run `sudo loginctl enable-linger "$(id -un)"` once.';
     case "service-disabled":
       return "The service is not enabled to start automatically. Run `t3 service install` to repair it.";
     case "service-stopped":
@@ -756,20 +764,18 @@ export const make = Effect.fn("cloud.boot_service.make")(function* (input: {
 
   const requireSystemdPrerequisites = Effect.gen(function* () {
     const problems = yield* readSystemdProblems(false);
-    const unavailable = problems.find((problem) => problem !== "linger-disabled");
+    const unavailable = problems.find((problem) => !isBootServiceWarning(problem));
     if (unavailable) return yield* new BootServicePrerequisiteError({ problem: unavailable });
     if (!problems.includes("linger-disabled")) return;
+    // polkit lets an active local session enable lingering for its own user,
+    // so this usually works without sudo. When it is refused, the service
+    // still runs while the user is logged in; status reports the warning and
+    // the refusal is in the boot-service log.
     yield* runStep("enabling lingering for this user", "loginctl", [
       "enable-linger",
       "--no-ask-password",
       ...(uid === undefined ? [] : [String(uid)]),
-    ]).pipe(
-      Effect.mapError(
-        (cause) => new BootServicePrerequisiteError({ problem: "linger-disabled", cause }),
-      ),
-    );
-    const remaining = yield* readSystemdProblems(false);
-    if (remaining[0]) return yield* new BootServicePrerequisiteError({ problem: remaining[0] });
+    ]).pipe(Effect.ignore);
   });
 
   const install = Effect.fn("cloud.boot_service.install")(function* (options?: {
@@ -1010,7 +1016,7 @@ export const make = Effect.fn("cloud.boot_service.make")(function* (input: {
       ...(installedBaseDir === undefined ? {} : { installedBaseDir }),
       problems,
       current:
-        problems.length === 0 &&
+        problems.every(isBootServiceWarning) &&
         normalizeUnit(unit) === normalizeUnit(detectedManager.render(plan)) &&
         runtimeEntryExists &&
         Option.isSome(runtimeSentinel) &&

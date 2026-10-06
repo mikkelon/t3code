@@ -251,59 +251,25 @@ const makeHarness = Effect.fn("test.make_boot_service_harness")(function* (
 });
 
 it.layer(NodeServices.layer)("boot service install", (it) => {
-  it.effect(
-    "fails before installing files or validating a runtime when lingering needs an administrator",
-    () =>
-      Effect.gen(function* () {
-        const { service, fs, statePath, commands, control, runtime } = yield* makeHarness();
-        const before = yield* service.status;
-        control.linger = "no";
-        control.failCommand = "loginctl enable-linger --no-ask-password 501";
-        yield* fs.remove(runtime.sentinelPath);
+  it.effect("installs without lingering when enabling it needs an administrator", () =>
+    Effect.gen(function* () {
+      const { service, fs, statePath, commands, control } = yield* makeHarness();
+      control.linger = "no";
+      control.failCommand = "loginctl enable-linger --no-ask-password 501";
 
-        const error = yield* service.install().pipe(Effect.flip);
+      const plan = yield* service.install();
 
-        expect(error).toMatchObject({
-          _tag: "BootServicePrerequisiteError",
-          problem: "linger-disabled",
-        });
-        expect(error.message).toContain('sudo loginctl enable-linger "$(id -un)"');
-        expect(error.message).toContain("last login session ends");
-        expect(yield* fs.exists(before.unitPath)).toBe(false);
-        expect(yield* fs.exists(statePath)).toBe(false);
-        expect(commands.some((command) => command.includes("--version"))).toBe(false);
-        expect(
-          commands.some(
-            (command) => command.includes("daemon-reload") || command.includes("restart"),
-          ),
-        ).toBe(false);
-        expect(yield* fs.readFileString(before.logPath)).toContain("[linger-disabled]");
-      }),
-  );
-
-  it.effect(
-    "detects a partial install and preserves the running service when repair lacks permission",
-    () =>
-      Effect.gen(function* () {
-        const { service, fs, statePath, commands, control } = yield* makeHarness();
-        const plan = yield* service.install();
-        const before = yield* fs.readFileString(statePath);
-        const unit = yield* fs.readFileString(plan.unitPath);
-        control.linger = "no";
-        control.failCommand = "loginctl enable-linger --no-ask-password 501";
-
-        expect(yield* service.status).toMatchObject({
-          current: false,
-          problems: ["linger-disabled"],
-        });
-        commands.length = 0;
-        expect((yield* service.install().pipe(Effect.flip))._tag).toBe(
-          "BootServicePrerequisiteError",
-        );
-        expect(yield* fs.readFileString(statePath)).toBe(before);
-        expect(yield* fs.readFileString(plan.unitPath)).toBe(unit);
-        expect(commands).not.toContain("systemctl --user stop t3code.service");
-      }),
+      expect(yield* fs.exists(plan.unitPath)).toBe(true);
+      expect(yield* fs.exists(statePath)).toBe(true);
+      expect(commands).toContain("systemctl --user restart t3code.service");
+      // A warning, not a reason to repair: a later install leaves it running.
+      const status = yield* service.status;
+      expect(status).toMatchObject({ current: true, problems: ["linger-disabled"] });
+      expect(BootService.formatBootServiceProblem("linger-disabled")).toContain(
+        'sudo loginctl enable-linger "$(id -un)"',
+      );
+      expect(yield* fs.readFileString(plan.logPath)).toContain("enabling lingering");
+    }),
   );
 
   it.effect("enables lingering before installing and repairs stopped or disabled services", () =>
@@ -327,18 +293,27 @@ it.layer(NodeServices.layer)("boot service install", (it) => {
     }),
   );
 
-  it.effect.each([
-    { command: "systemctl --user show-environment", problem: "user-manager-unavailable" },
-    { command: "loginctl show-user 501 --property=Linger --value", problem: "linger-unavailable" },
-  ])("reports failed prerequisite probes without installing: $command", ({ command, problem }) =>
+  it.effect("reports an unreachable user manager without installing", () =>
     Effect.gen(function* () {
       const { service, fs, statePath, control } = yield* makeHarness();
-      control.failCommand = command;
+      control.failCommand = "systemctl --user show-environment";
       expect(yield* service.install().pipe(Effect.flip)).toMatchObject({
         _tag: "BootServicePrerequisiteError",
-        problem,
+        problem: "user-manager-unavailable",
       });
       expect(yield* fs.exists(statePath)).toBe(false);
+    }),
+  );
+
+  it.effect("installs when lingering cannot be checked", () =>
+    Effect.gen(function* () {
+      const { service, control } = yield* makeHarness();
+      control.failCommand = "loginctl show-user 501 --property=Linger --value";
+      yield* service.install();
+      expect(yield* service.status).toMatchObject({
+        current: true,
+        problems: ["linger-unavailable"],
+      });
     }),
   );
 
