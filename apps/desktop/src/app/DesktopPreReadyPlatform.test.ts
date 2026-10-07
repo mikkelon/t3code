@@ -15,6 +15,7 @@ const {
   writeFileSyncMock,
   copyFileSyncMock,
   execFileSyncMock,
+  readFileSyncMock,
 } = vi.hoisted(() => ({
   appendSwitchMock: vi.fn(),
   getSwitchValueMock: vi.fn(),
@@ -25,6 +26,7 @@ const {
   writeFileSyncMock: vi.fn(),
   copyFileSyncMock: vi.fn(),
   execFileSyncMock: vi.fn(),
+  readFileSyncMock: vi.fn(),
 }));
 
 vi.mock("electron", () => ({
@@ -45,7 +47,7 @@ vi.mock("electron", () => ({
 }));
 
 vi.mock("node:fs", () => ({
-  readFileSync: () => "{}",
+  readFileSync: readFileSyncMock,
   mkdirSync: mkdirSyncMock,
   writeFileSync: writeFileSyncMock,
   copyFileSync: copyFileSyncMock,
@@ -68,6 +70,8 @@ describe("DesktopPreReadyPlatform", () => {
     writeFileSyncMock.mockReset();
     copyFileSyncMock.mockReset();
     execFileSyncMock.mockReset();
+    readFileSyncMock.mockReset();
+    readFileSyncMock.mockReturnValue("{}");
   });
 
   it.effect("preserves an explicit Linux password-store switch", () => {
@@ -140,15 +144,29 @@ describe("DesktopPreReadyPlatform", () => {
   });
 
   it.effect.each([
-    { previousEntry: undefined, label: "missing" },
-    { previousEntry: 'Exec="/Applications/deleted-previous.AppImage" %U', label: "stale" },
-  ])("prepares a $label Linux desktop entry before startup yields", ({ previousEntry }) => {
+    { previousEntry: undefined, label: "missing", shown: false },
+    {
+      previousEntry: '[Desktop Entry]\nExec="/Applications/deleted.AppImage" %U\nNoDisplay=true\n',
+      label: "stale hidden",
+      shown: false,
+    },
+    {
+      previousEntry: '[Desktop Entry]\nExec="/Applications/deleted.AppImage" %U\n',
+      label: "stale visible",
+      shown: true,
+    },
+  ])("prepares a $label Linux desktop entry before startup yields", ({ previousEntry, shown }) => {
     vi.stubEnv("VITE_DEV_SERVER_URL", "");
     vi.stubEnv("XDG_DATA_HOME", "/xdg");
     vi.stubEnv("APPIMAGE", "/Applications/current.AppImage");
     getSwitchValueMock.mockReturnValue("");
     let desktopName = "t3code.desktop";
     let desktopEntry = previousEntry;
+    readFileSyncMock.mockImplementation((path: string) => {
+      if (path !== "/xdg/applications/com.t3tools.T3Code.desktop") return "{}";
+      if (desktopEntry === undefined) throw new Error("ENOENT");
+      return desktopEntry;
+    });
     let iconInstalled = false;
     copyFileSyncMock.mockImplementation((_source: string, destination: string) => {
       iconInstalled = destination === "/xdg/icons/com.t3tools.T3Code.desktop.png";
@@ -182,6 +200,8 @@ describe("DesktopPreReadyPlatform", () => {
           "Icon=/xdg/icons/com.t3tools.T3Code.desktop.png",
         );
         assert.isTrue(identity.iconInstalled);
+        assert.equal(identity.desktopEntry?.includes("NoDisplay=true"), !shown);
+        assert.equal(identity.desktopEntry?.includes("StartupWMClass=t3code"), shown);
       }),
     ).pipe(Effect.ensuring(Effect.sync(() => vi.unstubAllEnvs())));
   });

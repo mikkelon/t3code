@@ -81,13 +81,17 @@ export function escapeDesktopEntryExecArgument(value: string): string {
   return escapeDesktopEntryString(`"${quoted}"`);
 }
 
-// The AppImage integration entry owns the window identity. This
+// By default the AppImage integration entry owns the window identity, so this
 // hidden URL-only entry must not compete with it for StartupWMClass matching.
+// `scripts/install.sh --desktop` instead writes this same file as the visible
+// launcher (launcherWmClass set), byte for byte, so these fields are canonical
+// for both writers.
 export function renderUrlHandlerDesktopEntry(input: {
   readonly displayName: string;
   readonly execTarget: string;
   readonly scheme: string;
   readonly iconPath?: string;
+  readonly launcherWmClass?: string;
 }): string {
   return [
     "[Desktop Entry]",
@@ -96,11 +100,28 @@ export function renderUrlHandlerDesktopEntry(input: {
     `Exec=${escapeDesktopEntryExecArgument(input.execTarget)} %U`,
     ...(input.iconPath === undefined ? [] : [`Icon=${escapeDesktopEntryString(input.iconPath)}`]),
     "Terminal=false",
-    "NoDisplay=true",
+    ...(input.launcherWmClass === undefined ? ["NoDisplay=true"] : []),
     "StartupNotify=false",
+    ...(input.launcherWmClass === undefined
+      ? []
+      : [
+          `StartupWMClass=${escapeDesktopEntryString(input.launcherWmClass)}`,
+          "Categories=Development;",
+        ]),
     `MimeType=x-scheme-handler/${input.scheme};`,
     "",
   ].join("\n");
+}
+
+// An entry someone made visible (the installer's launcher) stays the visible
+// launcher; a missing or hidden entry stays hidden, so integration tools such
+// as AppImageLauncher keep the only menu entry.
+export function isVisibleDesktopEntry(existing: string | null): boolean {
+  return (
+    existing !== null &&
+    /^\[Desktop Entry\]\s*$/m.test(existing) &&
+    !/^NoDisplay\s*=\s*true\s*$/m.test(existing)
+  );
 }
 
 export class DesktopLinuxUrlHandler extends Context.Service<
@@ -129,17 +150,18 @@ export const make = Effect.gen(function* () {
     // Inside the mounted AppImage, process.execPath points at a transient
     // /tmp/.mount_* path — the handler must launch the AppImage itself.
     const execTarget = Option.getOrElse(environment.appImagePath, () => process.execPath);
-    const content = renderUrlHandlerDesktopEntry({
-      displayName: environment.displayName,
-      execTarget,
-      scheme,
-      ...(environment.isPackaged ? { iconPath } : {}),
-    });
     // Pre-ready setup normally wrote this already. Avoid truncating a valid
     // entry while the portal may be reading it during startup.
     const existing = yield* fileSystem
       .readFileString(desktopEntryPath)
       .pipe(Effect.orElseSucceed(() => null));
+    const content = renderUrlHandlerDesktopEntry({
+      displayName: environment.displayName,
+      execTarget,
+      scheme,
+      ...(environment.isPackaged ? { iconPath } : {}),
+      ...(isVisibleDesktopEntry(existing) ? { launcherWmClass: environment.linuxWmClass } : {}),
+    });
     if (existing === content) return;
     yield* fileSystem.makeDirectory(environment.linuxApplicationsDir, { recursive: true });
     yield* fileSystem.writeFileString(desktopEntryPath, content);

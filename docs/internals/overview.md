@@ -111,7 +111,11 @@ is too late: Chromium caches the first registration, including failures. The ide
 the installed entry managed by `DesktopLinuxUrlHandler`. Pre-ready setup also refreshes that entry's
 `Exec` path before portal registration: AppImage updates can remove the previous executable, which
 makes the old entry invalid even though its filename is correct. The later URL handler avoids
-rewriting an identical entry while the portal may be reading it. On Wayland, Electron's synchronous
+rewriting an identical entry while the portal may be reading it. The entry is hidden unless it is
+already visible, which is how `scripts/install.sh --desktop` writes it as the menu launcher. The
+script renders the same bytes as `renderUrlHandlerDesktopEntry`, so a change to that field list
+must change the script too. `DesktopLinuxUrlHandler.test.ts` and `scripts/install.test.ts` pin
+the same lines. On Wayland, Electron's synchronous
 shortcut-registration result only confirms submission; it does not confirm desktop consent or
 an active binding.
 
