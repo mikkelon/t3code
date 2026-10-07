@@ -11,7 +11,11 @@ import * as HostProcess from "@t3tools/shared/HostProcess";
 
 import * as DesktopEarlyElectronStartup from "./DesktopEarlyElectronStartup.ts";
 import { resolveDesktopAppBranding } from "./DesktopEnvironment.ts";
-import { renderUrlHandlerDesktopEntry } from "./DesktopLinuxUrlHandler.ts";
+import {
+  isVisibleDesktopEntry,
+  LINUX_LAUNCHER_WM_CLASS,
+  renderUrlHandlerDesktopEntry,
+} from "./DesktopLinuxUrlHandler.ts";
 import * as ElectronProtocol from "../electron/ElectronProtocol.ts";
 
 export interface DesktopPreReadyCommandLineReader {
@@ -102,8 +106,15 @@ export const make = Effect.gen(function* () {
             );
           } catch {}
         }
+        const desktopEntryPath = NodePath.posix.join(applicationsDir, linux.linuxDesktopEntryName);
+        let existing: string | null = null;
+        try {
+          existing = NodeFS.readFileSync(desktopEntryPath, "utf8");
+        } catch {
+          // No entry yet.
+        }
         NodeFS.writeFileSync(
-          NodePath.posix.join(applicationsDir, linux.linuxDesktopEntryName),
+          desktopEntryPath,
           renderUrlHandlerDesktopEntry({
             displayName: resolveDesktopAppBranding({
               isDevelopment: linux.isDevelopment,
@@ -115,6 +126,9 @@ export const make = Effect.gen(function* () {
               process.execPath,
             scheme: ElectronProtocol.getDesktopScheme(linux.isDevelopment),
             ...(iconPath === undefined ? {} : { iconPath }),
+            ...(isVisibleDesktopEntry(existing)
+              ? { launcherWmClass: LINUX_LAUNCHER_WM_CLASS }
+              : {}),
           }),
           "utf8",
         );
