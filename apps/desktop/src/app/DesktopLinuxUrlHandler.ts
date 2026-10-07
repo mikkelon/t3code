@@ -74,13 +74,15 @@ const escapeUrlHandlerExecTarget = (value: string): string =>
     ? escapeDesktopEntryExecArgument(value)
     : escapeDesktopEntryString(value.replaceAll("%", "%%"));
 
-// The AppImage integration entry owns the window identity. This
-// hidden URL-only entry must not compete with it for StartupWMClass matching.
+// Hidden by default so it never competes with the AppImage entry for StartupWMClass.
+// `scripts/install.sh --desktop` writes this same file byte for byte as the visible
+// launcher (launcherWmClass set), so these fields are canonical for both writers.
 export function renderUrlHandlerDesktopEntry(input: {
   readonly displayName: string;
   readonly execTarget: string;
   readonly scheme: string;
   readonly iconPath?: string;
+  readonly launcherWmClass?: string;
 }): string {
   return [
     "[Desktop Entry]",
@@ -89,8 +91,14 @@ export function renderUrlHandlerDesktopEntry(input: {
     `Exec=${escapeUrlHandlerExecTarget(input.execTarget)} %U`,
     ...(input.iconPath === undefined ? [] : [`Icon=${escapeDesktopEntryString(input.iconPath)}`]),
     "Terminal=false",
-    "NoDisplay=true",
+    ...(input.launcherWmClass === undefined ? ["NoDisplay=true"] : []),
     "StartupNotify=false",
+    ...(input.launcherWmClass === undefined
+      ? []
+      : [
+          `StartupWMClass=${escapeDesktopEntryString(input.launcherWmClass)}`,
+          "Categories=Development;",
+        ]),
     `MimeType=x-scheme-handler/${input.scheme};`,
     "",
   ].join("\n");
@@ -106,6 +114,17 @@ function linuxThemeIconNames(desktopEntryName: string): readonly string[] {
 
 const sameBytes = (left: Uint8Array, right: Uint8Array): boolean =>
   left.length === right.length && left.every((byte, index) => byte === right[index]);
+
+// An entry someone made visible (the installer's launcher) stays the visible
+// launcher; a missing or hidden entry stays hidden, so integration tools such
+// as AppImageLauncher keep the only menu entry.
+export function isVisibleDesktopEntry(existing: string | null): boolean {
+  return (
+    existing !== null &&
+    /^\[Desktop Entry\]\s*$/m.test(existing) &&
+    !/^NoDisplay\s*=\s*true\s*$/m.test(existing)
+  );
+}
 
 export class DesktopLinuxUrlHandler extends Context.Service<
   DesktopLinuxUrlHandler,
@@ -140,16 +159,17 @@ export const make = Effect.gen(function* () {
       Option.orElse(() => environment.appImagePath),
       Option.getOrElse(() => process.execPath),
     );
+    // Avoid truncating the pre-ready entry while the portal may be reading it.
+    const existing = yield* fileSystem
+      .readFileString(desktopEntryPath)
+      .pipe(Effect.orElseSucceed(() => null));
     const content = renderUrlHandlerDesktopEntry({
       displayName: environment.displayName,
       execTarget,
       scheme,
       ...(environment.isPackaged ? { iconPath } : {}),
+      ...(isVisibleDesktopEntry(existing) ? { launcherWmClass: environment.linuxWmClass } : {}),
     });
-    // Avoid truncating the pre-ready entry while the portal may be reading it.
-    const existing = yield* fileSystem
-      .readFileString(desktopEntryPath)
-      .pipe(Effect.orElseSucceed(() => null));
     if (existing === content) return;
     yield* fileSystem.makeDirectory(environment.linuxApplicationsDir, { recursive: true });
     yield* fileSystem.writeFileString(desktopEntryPath, content);
