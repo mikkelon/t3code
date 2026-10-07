@@ -121,9 +121,18 @@ describe("DesktopPreReadyPlatform", () => {
   });
 
   it.effect.each([
-    { previousEntry: undefined, label: "missing" },
-    { previousEntry: 'Exec="/Applications/deleted-previous.AppImage" %U', label: "stale" },
-  ])("prepares a $label Linux desktop entry before startup yields", ({ previousEntry }) => {
+    { previousEntry: undefined, label: "missing", shown: false },
+    {
+      previousEntry: '[Desktop Entry]\nExec="/Applications/deleted.AppImage" %U\nNoDisplay=true\n',
+      label: "stale hidden",
+      shown: false,
+    },
+    {
+      previousEntry: '[Desktop Entry]\nExec="/Applications/deleted.AppImage" %U\n',
+      label: "stale visible",
+      shown: true,
+    },
+  ])("prepares a $label Linux desktop entry before startup yields", ({ previousEntry, shown }) => {
     vi.stubEnv("VITE_DEV_SERVER_URL", "");
     getSwitchValueMock.mockReturnValue("");
     let desktopName = "t3code.desktop";
@@ -134,7 +143,9 @@ describe("DesktopPreReadyPlatform", () => {
     const iconBytes = Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]);
     readFileSyncMock.mockImplementation((path: string) => {
       if (path === iconSource) return iconBytes;
-      return "{}";
+      if (path !== "/xdg/applications/com.t3tools.T3Code.desktop") return "{}";
+      if (desktopEntry === undefined) throw new Error("ENOENT");
+      return desktopEntry;
     });
     setDesktopNameMock.mockImplementation((name: string) => {
       desktopName = name;
@@ -177,6 +188,8 @@ describe("DesktopPreReadyPlatform", () => {
           "icon must not be copied out of the app bundle",
         );
         assert.isTrue(identity.iconInstalled, "icon must be written from the bundled bytes");
+        assert.equal(identity.desktopEntry?.includes("NoDisplay=true"), !shown);
+        assert.equal(identity.desktopEntry?.includes("StartupWMClass=com.t3tools.T3Code"), shown);
       }),
     ).pipe(Effect.ensuring(Effect.sync(() => vi.unstubAllEnvs())));
   });
