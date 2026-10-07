@@ -4,6 +4,12 @@
 #
 #   curl -fsSL https://raw.githubusercontent.com/mikkelon/t3code/main/scripts/install.sh | sh
 #
+# On Linux, --desktop also installs the desktop app (AppImage, app menu
+# launcher and icon), and --uninstall-desktop removes it again:
+#
+#   curl -fsSL https://raw.githubusercontent.com/mikkelon/t3code/main/scripts/install.sh | sh -s -- --desktop
+#   curl -fsSL https://raw.githubusercontent.com/mikkelon/t3code/main/scripts/install.sh | sh -s -- --uninstall-desktop
+#
 # Environment:
 #   T3CODE_CHANNEL           release train to follow: stable, nightly, or preview
 #                            (default: stable; preview is a maintainers' test train)
@@ -12,6 +18,11 @@
 #   T3CODE_INSTALL_BIN_DIR   where the `t3` symlink goes (default: ~/.local/bin)
 #   T3CODE_RELEASE_BASE_URL  mirror for releases/download (default: GitHub)
 #   T3CODE_RELEASE_INDEX_URL release list used to pick a version (default: GitHub API)
+#   T3CODE_DESKTOP_DIR       where --desktop puts T3-Code.AppImage
+#                            (default: $XDG_DATA_HOME/t3code)
+#   T3CODE_NO_LAUNCH         set to 1 so --desktop does not start the app
+#   XDG_DATA_HOME            base for the app, launcher and icon
+#                            (default: ~/.local/share)
 #
 # The archive is unpacked into $T3CODE_HOME/runtime/versions/<version>, the
 # same layout `t3 service install` uses, so the service reuses this download
@@ -40,11 +51,84 @@ step() {
   if "$interactive"; then printf '\r\033[2K  %s%s%s' "$muted" "$1" "$reset" >&2
   else printf '  %s\n' "$1" >&2; fi
 }
+# --desktop installs the CLI as usual, then the Linux desktop app.
+# --uninstall-desktop removes only the desktop app, without any download.
+mode=cli
+for arg in "$@"; do
+  case "$arg" in
+    --desktop | --uninstall-desktop) ;;
+    *) fail "unknown argument '${arg}'; the options are --desktop and --uninstall-desktop" ;;
+  esac
+  [ "$mode" = cli ] || [ "$mode" = "${arg#--}" ] || fail "use either --desktop or --uninstall-desktop, not both"
+  mode="${arg#--}"
+done
+banner_label=CLI
+if [ "$mode" != cli ]; then
+  [ "$(uname -s)" = Linux ] || fail "--${mode} is only for Linux; there is no desktop app build of this fork for $(uname -s)"
+  data_home="${XDG_DATA_HOME:-$HOME/.local/share}"
+  data_home="${data_home%/}"
+  desktop_dir="${T3CODE_DESKTOP_DIR:-$data_home/t3code}"
+  desktop_dir="${desktop_dir%/}"
+  case "$data_home" in /*) ;; *) fail "XDG_DATA_HOME must be an absolute path" ;; esac
+  case "$desktop_dir" in /*) ;; *) fail "T3CODE_DESKTOP_DIR must be an absolute path" ;; esac
+  # A fixed, version-less name: electron-updater's AppImageUpdater replaces
+  # this file in place, so the launcher keeps working across app updates.
+  appimage="${desktop_dir}/T3-Code.AppImage"
+  apps_dir="${data_home}/applications"
+  launcher="${apps_dir}/com.t3tools.T3Code.desktop"
+  icon="${data_home}/icons/com.t3tools.T3Code.desktop.png"
+fi
+refresh_desktop_database() {
+  if command -v update-desktop-database >/dev/null 2>&1 && [ -d "$apps_dir" ]; then
+    update-desktop-database "$apps_dir" >/dev/null 2>&1 || true
+  fi
+}
+if [ "$mode" = uninstall-desktop ]; then
+  removed=false
+  for file in "$appimage" "$launcher" "$icon"; do
+    if [ -e "$file" ] || [ -L "$file" ]; then
+      rm -f "$file"
+      printf '  Removed %s\n' "$file"
+      removed=true
+    fi
+  done
+  [ -n "${T3CODE_DESKTOP_DIR:-}" ] || rmdir "$desktop_dir" 2>/dev/null || true
+  refresh_desktop_database
+  "$removed" || printf '  The T3 Code desktop app is not installed.\n'
+  printf '\n  %s\n  %s\n\n' \
+    "The t3 CLI, the background service and ~/.t3 were left in place." \
+    "Run t3 uninstall to remove the CLI and the service; it keeps ~/.t3/userdata."
+  exit 0
+fi
+if [ "$mode" = desktop ]; then
+  banner_label=Desktop
+  nl='
+'
+  case "${appimage}${icon}" in *"$nl"*) fail "the desktop app paths cannot contain a newline" ;; esac
+  # Reads stdin so a backslash in the path cannot change sha512sum's output.
+  if command -v sha512sum >/dev/null 2>&1; then
+    sha512_hex() { sha512sum < "$1" | cut -d' ' -f1; }
+  elif command -v shasum >/dev/null 2>&1; then
+    sha512_hex() { shasum -a 512 < "$1" | cut -d' ' -f1; }
+  else
+    fail "sha512sum or shasum is required for --desktop"
+  fi
+  if command -v base64 >/dev/null 2>&1; then
+    base64_decode() { base64 -d; }
+  elif command -v openssl >/dev/null 2>&1; then
+    base64_decode() { openssl base64 -d -A; }
+  else
+    fail "base64 or openssl is required for --desktop"
+  fi
+  command -v od >/dev/null 2>&1 || fail "od is required for --desktop"
+  command -v awk >/dev/null 2>&1 || fail "awk is required for --desktop"
+fi
+
 if "$interactive"; then
   printf '\n%s' "$bold" >&2
   printf '  %s\n' '██████████ ████████ ' >&2
   printf '  %s\n' '    ███       ▄██▀       T3 Code' >&2
-  printf '  %s%s     %sCLI installer%s\n' '    ███       ████▄ ' "$reset" "$muted" "$reset$bold" >&2
+  printf '  %s%s     %s%s installer%s\n' '    ███       ████▄ ' "$reset" "$muted" "$banner_label" "$reset$bold" >&2
   printf '  %s\n' '    ███    ▄     ███' >&2
   printf '  %s\n' '    ███    ███████▀ ' >&2
   printf '%s\n' "$reset" >&2
@@ -227,3 +311,163 @@ case ":${PATH}:" in
   *":${bin_dir}:"*) printf '  Run %st3%s to get started.\n\n' "$bold" "$reset" ;;
   *) printf '  Add %s to your PATH, then run %st3%s.\n\n' "$bin_dir" "$bold" "$reset" ;;
 esac
+
+[ "$mode" = desktop ] || exit 0
+
+say() {
+  if "$interactive"; then printf '\r\033[2K' >&2; fi
+  printf '  %s\n' "$1" >&2
+}
+
+# The sha512 (base64) of the `files:` entry whose url is $2 in an
+# electron-builder update feed ($1).
+feed_sha512() {
+  awk -v name="$2" '
+    { sub(/\r$/, "") }
+    /^[^ ]/ { url = "" }
+    $1 == "-" && $2 == "url:" { url = $3 }
+    $1 == "sha512:" && url == name { print $2; exit }
+  ' "$1"
+}
+
+# The launcher must stay byte-identical to what renderUrlHandlerDesktopEntry
+# in apps/desktop/src/app/DesktopLinuxUrlHandler.ts renders with
+# launcherWmClass set (the canonical field list); otherwise the app rewrites
+# it on every launch. These two mirror its string and Exec escaping.
+tab="$(printf '\t')"
+cr="$(printf '\r')"
+desktop_escape() {
+  printf '%s' "$1" | sed -e 's/\\/\\\\/g' -e "s/${tab}/\\\\t/g" -e "s/${cr}/\\\\r/g"
+}
+desktop_exec_arg() {
+  # shellcheck disable=SC2016 # sed expressions, not shell expansions
+  quoted="$(printf '%s' "$1" | sed -e 's/\\/\\\\/g' -e 's/`/\\`/g' -e 's/\$/\\$/g' -e 's/"/\\"/g' -e 's/%/%%/g')"
+  desktop_escape "\"${quoted}\""
+}
+
+# The AppImage runtime dlopen()s libfuse.so.2 to mount itself.
+has_fuse2() {
+  for ldconfig in "$(command -v ldconfig 2>/dev/null || true)" /sbin/ldconfig /usr/sbin/ldconfig; do
+    if [ -x "$ldconfig" ] && "$ldconfig" -p 2>/dev/null | grep -q 'libfuse\.so\.2'; then return 0; fi
+  done
+  for lib in /usr/lib/libfuse.so.2 /usr/lib64/libfuse.so.2 /usr/lib/*/libfuse.so.2 \
+    /lib/libfuse.so.2 /lib64/libfuse.so.2 /lib/*/libfuse.so.2; do
+    if [ -e "$lib" ]; then return 0; fi
+  done
+  return 1
+}
+
+desktop_cleanup() {
+  if [ -n "${download_pid:-}" ]; then
+    kill "$download_pid" 2>/dev/null || true
+    wait "$download_pid" 2>/dev/null || true
+  fi
+  if [ -n "$desktop_tmp" ]; then
+    rm -f "$desktop_tmp" "${desktop_tmp}.yml" "${desktop_tmp}.yml.headers" "${desktop_tmp}.headers" "${desktop_tmp}.errors"
+  fi
+  [ -z "$icon_work" ] || rm -rf "$icon_work"
+  [ -z "$icon_tmp" ] || rm -f "$icon_tmp"
+  [ -z "$launcher_tmp" ] || rm -f "$launcher_tmp"
+}
+
+case "$arch" in
+  x64) appimage_arch=x86_64; feed=latest-linux.yml ;;
+  arm64) appimage_arch=arm64; feed=latest-linux-arm64.yml ;;
+esac
+appimage_name="T3-Code-${version}-${appimage_arch}.AppImage"
+no_build="no Linux desktop build for ${appimage_arch} in ${version}"
+# Mirrors resolveDesktopAppBranding in apps/desktop/src/app/DesktopEnvironment.ts.
+case "$version" in
+  *-nightly.* | *-preview.*) display_name="T3 Code (Nightly)" ;;
+  *) display_name="T3 Code (Alpha)" ;;
+esac
+
+download_pid='' desktop_tmp='' icon_work='' icon_tmp='' launcher_tmp=''
+trap desktop_cleanup EXIT
+trap 'printf "\n" >&2; exit 130' INT
+trap 'printf "\n" >&2; exit 143' TERM
+mkdir -p "$desktop_dir"
+# Next to the target, so the final mv is an atomic rename. A running app keeps
+# its mounted old file, as it does when electron-updater replaces it.
+desktop_tmp="$(mktemp "${desktop_dir}/.T3-Code.AppImage.XXXXXX")"
+
+step "Checking the desktop app..."
+fetch_status=0
+fetch "${base_url}/v${version}/${feed}" "${desktop_tmp}.yml" || fetch_status=$?
+[ "$fetch_status" -ne 44 ] || fail "$no_build"
+[ "$fetch_status" -eq 0 ] || fail "could not download ${feed}"
+expected="$(feed_sha512 "${desktop_tmp}.yml" "$appimage_name")"
+[ -n "$expected" ] || fail "$no_build"
+expected="$(printf '%s' "$expected" | base64_decode | od -An -tx1 | tr -d ' \n')"
+[ "${#expected}" -eq 128 ] || fail "${feed} has an unreadable checksum for ${appimage_name}"
+
+if [ -f "$appimage" ] && [ "$(sha512_hex "$appimage")" = "$expected" ]; then
+  say "The T3 Code ${version} desktop app is already installed."
+else
+  say "${muted}Installing${reset} the T3 Code desktop app ${bold}${version}${reset}"
+  step "Downloading..."
+  download_status=0
+  download "${base_url}/v${version}/${appimage_name}" "$desktop_tmp" || download_status=$?
+  [ "$download_status" -ne 44 ] || fail "$no_build"
+  [ "$download_status" -eq 0 ] || fail "could not download ${appimage_name}"
+  step "Verifying the download..."
+  [ "$(sha512_hex "$desktop_tmp")" = "$expected" ] || fail "checksum mismatch for ${appimage_name}"
+  chmod 755 "$desktop_tmp"
+  mv -f "$desktop_tmp" "$appimage"
+fi
+rm -f "$desktop_tmp" "${desktop_tmp}.yml"
+desktop_tmp=
+
+# Extraction needs no FUSE. In the release .DirIcon links to the packaged
+# icon under usr/share/icons, which is extracted first so cp -L can follow it.
+step "Installing the icon..."
+icon_work="$(mktemp -d)"
+if ! {
+  (cd "$icon_work" && "$appimage" --appimage-extract 'usr/share/icons/*' &&
+    "$appimage" --appimage-extract .DirIcon) >/dev/null &&
+    mkdir -p "${icon%/*}" &&
+    icon_tmp="$(mktemp "${icon%/*}/.com.t3tools.T3Code.desktop.png.XXXXXX")" &&
+    cp -L "${icon_work}/squashfs-root/.DirIcon" "$icon_tmp" &&
+    chmod 644 "$icon_tmp" &&
+    mv -f "$icon_tmp" "$icon"
+} 2>/dev/null; then
+  [ -z "$icon_tmp" ] || rm -f "$icon_tmp"
+  say "Could not extract the icon; the app installs its icon on first launch."
+fi
+rm -rf "$icon_work"
+icon_work='' icon_tmp=''
+
+step "Adding T3 Code to the app menu..."
+mkdir -p "$apps_dir"
+launcher_tmp="$(mktemp "${apps_dir}/.com.t3tools.T3Code.desktop.XXXXXX")"
+printf '%s\n' \
+  '[Desktop Entry]' \
+  'Type=Application' \
+  "Name=${display_name}" \
+  "Exec=$(desktop_exec_arg "$appimage") %U" \
+  "Icon=$(desktop_escape "$icon")" \
+  'Terminal=false' \
+  'StartupNotify=false' \
+  'StartupWMClass=t3code' \
+  'Categories=Development;' \
+  'MimeType=x-scheme-handler/t3code;' > "$launcher_tmp"
+chmod 644 "$launcher_tmp"
+mv -f "$launcher_tmp" "$launcher"
+launcher_tmp=
+refresh_desktop_database
+trap - EXIT
+
+say "${green}Installed the T3 Code desktop app ${version}${reset}"
+printf '\n  App       %s\n  Launcher  %s\n\n  T3 Code is in your app menu.\n' "$appimage" "$launcher"
+if ! has_fuse2; then
+  printf '%s\n' "" \
+    "  AppImages need FUSE 2 (libfuse.so.2), which is missing here. Install it, then start" \
+    "  T3 Code from your app menu: fuse2 (Arch), libfuse2t64 (Ubuntu 24.04+, Debian 13)," \
+    "  libfuse2 (older Debian and Ubuntu) or fuse-libs (Fedora)."
+elif [ -n "${DISPLAY:-}${WAYLAND_DISPLAY:-}" ] && [ "${T3CODE_NO_LAUNCH:-}" != 1 ]; then
+  nohup "$appimage" < /dev/null > /dev/null 2>&1 &
+  printf '\n  Starting T3 Code...\n'
+else
+  printf '\n  Start it from your app menu, or run %s\n' "$appimage"
+fi
+printf '\n'

@@ -181,6 +181,31 @@ describe("DesktopLinuxUrlHandler", () => {
     assert.include(entry, "Icon=/home/al ice/icons/T3\\\\x.png");
   });
 
+  it("renders the installer's visible launcher with the window identity", () => {
+    assert.equal(
+      DesktopLinuxUrlHandler.renderUrlHandlerDesktopEntry({
+        displayName: "T3 Code (Alpha)",
+        execTarget: "/home/alice/.local/share/t3code/T3-Code.AppImage",
+        scheme: "t3code",
+        iconPath: "/home/alice/.local/share/icons/com.t3tools.T3Code.desktop.png",
+        launcherWmClass: "t3code",
+      }),
+      [
+        "[Desktop Entry]",
+        "Type=Application",
+        "Name=T3 Code (Alpha)",
+        'Exec="/home/alice/.local/share/t3code/T3-Code.AppImage" %U',
+        "Icon=/home/alice/.local/share/icons/com.t3tools.T3Code.desktop.png",
+        "Terminal=false",
+        "StartupNotify=false",
+        "StartupWMClass=t3code",
+        "Categories=Development;",
+        "MimeType=x-scheme-handler/t3code;",
+        "",
+      ].join("\n"),
+    );
+  });
+
   it("carries structured context on registration errors", () => {
     const writeError = new DesktopLinuxUrlHandler.DesktopLinuxUrlHandlerRegistrationError({
       step: "write-desktop-entry",
@@ -279,6 +304,63 @@ describe("DesktopLinuxUrlHandler", () => {
           args: ["default", "com.t3tools.T3Code.desktop", "x-scheme-handler/t3code"],
         },
       ]);
+    });
+  });
+
+  it.effect.each([
+    {
+      label: "missing",
+      existingEntry: undefined,
+      visible: false,
+    },
+    {
+      label: "hidden",
+      existingEntry: DesktopLinuxUrlHandler.renderUrlHandlerDesktopEntry({
+        displayName: "T3 Code (Alpha)",
+        execTarget: "/home/alice/Downloads/old.AppImage",
+        scheme: "t3code",
+      }),
+      visible: false,
+    },
+    {
+      label: "visible",
+      existingEntry: [
+        "[Desktop Entry]",
+        "Type=Application",
+        "Name=T3 Code (Alpha)",
+        'Exec="/home/alice/Downloads/old.AppImage" %U',
+        "Categories=Development;",
+        "MimeType=x-scheme-handler/t3code;",
+        "",
+      ].join("\n"),
+      visible: true,
+    },
+  ])("keeps a $label entry's visibility and refreshes its Exec", ({ existingEntry, visible }) => {
+    const recorded = emptyRecording();
+    return Effect.gen(function* () {
+      yield* runRegister(recorded, existingEntry === undefined ? {} : { existingEntry });
+
+      const content = recorded.files[0]?.content ?? "";
+      assert.include(content, 'Exec="/home/alice/Applications/T3-Code.AppImage" %U');
+      assert.equal(content.includes("NoDisplay=true"), !visible);
+      assert.equal(content.includes("StartupWMClass=t3code"), visible);
+      assert.equal(content.includes("Categories=Development;"), visible);
+    });
+  });
+
+  it.effect("leaves a current visible launcher untouched", () => {
+    const recorded = emptyRecording();
+    return Effect.gen(function* () {
+      yield* runRegister(recorded, {
+        existingEntry: DesktopLinuxUrlHandler.renderUrlHandlerDesktopEntry({
+          displayName: "T3 Code (Alpha)",
+          execTarget: "/home/alice/Applications/T3-Code.AppImage",
+          scheme: "t3code",
+          iconPath: "/home/alice/.local/share/icons/com.t3tools.T3Code.desktop.png",
+          launcherWmClass: "t3code",
+        }),
+      });
+      assert.deepEqual(recorded.files, []);
     });
   });
 
