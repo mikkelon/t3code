@@ -27,6 +27,32 @@ agents, for example `codex login` ([Codex CLI](https://developers.openai.com/cod
 or `claude auth login` ([Claude Code](https://claude.com/product/claude-code)).
 See [Providers](./docs/user/install.md#providers) for the full list.
 
+### Desktop app (Linux)
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/mikkelon/t3code/main/scripts/install.sh | sh -s -- --desktop
+```
+
+This installs the newest AppImage as `~/.local/share/t3code/T3-Code.AppImage`, adds
+**T3 Code** to your app menu, puts `t3` in `~/.local/bin` and starts the app. Run it
+again to repair the menu entry or catch up with the newest release. Replace
+`--desktop` with `--uninstall-desktop` to remove the app; the CLI, the background
+service and `~/.t3` stay. AppImages need FUSE 2. If it is missing, the installer
+names the package to add (`fuse2` on Arch).
+
+To install by hand instead, download the `.AppImage` or `.deb` for your architecture
+from [Releases](https://github.com/mikkelon/t3code/releases/latest) and make the
+AppImage executable (`chmod +x`) before running it.
+
+Both update themselves from this fork's releases. On first launch the app installs
+the background service from the version it ships, and each app update moves the
+service to the new version once no agents are running. A service you installed with
+`t3 service install` is used as it is. To run agents inside the app instead, turn on
+**Don't run agents in the background** under **Settings → Connections → Advanced**.
+
+The fork publishes no macOS or Windows desktop builds and no Windows CLI. Build
+them from source if you need them (see below).
+
 ### Command line and background service (Linux, Apple Silicon Mac)
 
 For machines without the desktop app, such as a headless server:
@@ -41,31 +67,15 @@ running in the background (a systemd user service on Linux, started at boot; a
 launchd agent on macOS, started at login). `t3 service status` shows its state and
 log, and `t3 --help` lists everything else.
 
-### Desktop app (Linux)
-
-Download the `.AppImage` or `.deb` for your architecture from
-[Releases](https://github.com/mikkelon/t3code/releases/latest). On Arch, use the
-AppImage:
-
-```bash
-chmod +x T3-Code-*.AppImage && ./T3-Code-*.AppImage
-```
-
-Both update themselves from this fork's releases. On first launch the app installs
-the background service from the version it ships, and each app update moves the
-service to the new version once no agents are running. A service you installed with
-`t3 service install` is used as it is. To run agents inside the app instead, turn on
-**Don't run agents in the background** under **Settings → Connections → Advanced**.
-
-The fork publishes no macOS or Windows desktop builds and no Windows CLI. Build
-them from source if you need them (see below).
-
 ### Switching from upstream T3 Code
 
-Run the installer above, then `t3 service install` to move an existing service to
-the fork's build, and replace the desktop app with the fork's AppImage or `.deb`.
-Your data in `~/.t3` is kept: the fork uses the same `t3` command, home directory,
-service name and app ID.
+Remove upstream's desktop app, then run the desktop installer above (or the CLI
+installer on a headless machine). If upstream's background service is installed,
+also run `t3 service install` once to move it to the fork's build. Without that, the
+app keeps using upstream's service and moves it only when it is older than the app.
+If upstream's service is newer, `t3 service install` refuses and asks for
+`--allow-downgrade`. Your data in `~/.t3` is kept: the fork uses the same `t3`
+command, home directory, service name and app ID.
 
 ## Update
 
@@ -74,7 +84,7 @@ service name and app ID.
 | Background service, with the desktop app | Updates with the app                                                          |
 | CLI and background service, headless     | `t3 update` on the machine (asks before restarting the service)               |
 | A server from another client             | **Update server** in the version notice, or `t3 update <version>` on its host |
-| Linux desktop app                        | Updates itself; or download the new release                                   |
+| Linux desktop app                        | Updates itself; or run the desktop installer again                            |
 
 Fork releases are only published on the stable channel; there are no nightly
 builds. See [Updating T3 Code](./docs/user/updating.md).
