@@ -418,8 +418,10 @@ describe("terminatePosixOwnedProcessTree", () => {
 
   it.live("rotates more than 64 live parents without scanning retained tombstones", () =>
     Effect.gen(function* () {
-      // Use a different synthetic parent group; the fixture shares the runner's real group, which cleanup skips.
-      const parentPidBase = process.pid < 500_000 ? 500_000 : 1_000;
+      // Fake groups live above Linux's PID_MAX_LIMIT (2^22) so none can share
+      // the test worker's real pgid/sid; a collision makes termination skip
+      // that group as T3's own and report it as retained.
+      const parentPidBase = 5_000_000;
       const parents = Array.from({ length: 130 }, (_, index) =>
         identity(parentPidBase + index, 100, parentPidBase + index, parentPidBase + index),
       );
