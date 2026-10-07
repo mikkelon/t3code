@@ -15,6 +15,8 @@ import * as DesktopEarlyElectronStartup from "./DesktopEarlyElectronStartup.ts";
 import { trimmedString } from "./DesktopConfig.ts";
 import { resolveDesktopAppBranding } from "./DesktopEnvironment.ts";
 import {
+  isVisibleDesktopEntry,
+  LINUX_LAUNCHER_WM_CLASS,
   renderUrlHandlerDesktopEntry,
   replacedVersionedAppImagePath,
 } from "./DesktopLinuxUrlHandler.ts";
@@ -122,15 +124,22 @@ export const make = Effect.gen(function* () {
           } catch {}
         }
         const desktopEntryPath = NodePath.posix.join(applicationsDir, linux.linuxDesktopEntryName);
+        let existing: string | null = null;
+        try {
+          existing = NodeFS.readFileSync(desktopEntryPath, "utf8");
+        } catch {
+          // No entry yet.
+        }
         const { appImagePath } = linuxDesktopEntryConfig;
         if (
+          existing !== null &&
           Option.isSome(appImagePath) &&
           Option.isNone(linuxDesktopEntryConfig.launcherPath) &&
           Option.contains(linuxDesktopEntryConfig.relaunchedByUpdater, "true")
         ) {
           try {
             const replacedPath = replacedVersionedAppImagePath({
-              previousEntry: NodeFS.readFileSync(desktopEntryPath, "utf8"),
+              previousEntry: existing,
               appImagePath: appImagePath.value,
             });
             // Relative, so the pair survives a moved folder; symlink never overwrites a file.
@@ -155,6 +164,9 @@ export const make = Effect.gen(function* () {
               ) ?? process.execPath,
             scheme: ElectronProtocol.getDesktopScheme(linux.isDevelopment),
             ...(iconPath === undefined ? {} : { iconPath }),
+            ...(isVisibleDesktopEntry(existing)
+              ? { launcherWmClass: LINUX_LAUNCHER_WM_CLASS }
+              : {}),
           }),
           "utf8",
         );
