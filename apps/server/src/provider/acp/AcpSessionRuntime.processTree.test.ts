@@ -654,8 +654,12 @@ describe("terminatePosixOwnedProcessTree", () => {
 
   it.live("rotates more than 64 live parents without scanning retained tombstones", () =>
     Effect.gen(function* () {
+      // Fake groups live above Linux's PID_MAX_LIMIT (2^22) so none can share
+      // the test worker's real pgid/sid; a collision makes termination skip
+      // that group as T3's own and report it as retained.
+      const parentPidBase = 5_000_000;
       const parents = Array.from({ length: 130 }, (_, index) =>
-        identity(1_000 + index, 100, 1_000 + index, 1_000 + index),
+        identity(parentPidBase + index, 100, parentPidBase + index, parentPidBase + index),
       );
       let childListReads = 0;
       let identityCalls = 0;
