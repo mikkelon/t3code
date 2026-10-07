@@ -11,7 +11,7 @@ import { HostProcessPlatform } from "@t3tools/shared/hostProcess";
 
 import * as DesktopEarlyElectronStartup from "./DesktopEarlyElectronStartup.ts";
 import { resolveDesktopAppBranding } from "./DesktopEnvironment.ts";
-import { renderUrlHandlerDesktopEntry } from "./DesktopLinuxUrlHandler.ts";
+import { isVisibleDesktopEntry, renderUrlHandlerDesktopEntry } from "./DesktopLinuxUrlHandler.ts";
 import * as ElectronProtocol from "../electron/ElectronProtocol.ts";
 
 export interface DesktopPreReadyCommandLineReader {
@@ -90,8 +90,15 @@ export const make = Effect.gen(function* () {
             // Icon installation is optional; registration retries after readiness.
           }
         }
+        const desktopEntryPath = NodePath.posix.join(applicationsDir, linux.linuxDesktopEntryName);
+        let existing: string | null = null;
+        try {
+          existing = NodeFS.readFileSync(desktopEntryPath, "utf8");
+        } catch {
+          // No entry yet.
+        }
         NodeFS.writeFileSync(
-          NodePath.posix.join(applicationsDir, linux.linuxDesktopEntryName),
+          desktopEntryPath,
           renderUrlHandlerDesktopEntry({
             displayName: resolveDesktopAppBranding({
               isDevelopment: linux.isDevelopment,
@@ -100,6 +107,7 @@ export const make = Effect.gen(function* () {
             execTarget: process.env.APPIMAGE?.trim() || process.execPath,
             scheme: ElectronProtocol.getDesktopScheme(linux.isDevelopment),
             ...(iconPath === undefined ? {} : { iconPath }),
+            ...(isVisibleDesktopEntry(existing) ? { launcherWmClass: linux.linuxWmClass } : {}),
           }),
           "utf8",
         );
