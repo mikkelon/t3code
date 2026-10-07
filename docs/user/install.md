@@ -27,11 +27,11 @@ line to add. Set `T3CODE_VERSION` to pin an exact version, such as
 | Start the server and open the web app            | `t3`                                                      |
 | Start the server without a browser               | `t3 serve`                                                |
 | Keep it running in the background (macOS, Linux) | `t3 service install` ([details](./background-service.md)) |
+| Move to the newest release                       | `t3 update`                                               |
+| Remove it again                                  | `t3 uninstall`                                            |
 
 The desktop app installs the background service by itself, so a machine with
 the desktop app needs none of these commands.
-| Move to the newest release | `t3 update` |
-| Remove it again | `t3 uninstall` |
 
 Run `t3 help` or `t3 --help` for the full reference. To start in a new working
 directory, use an explicit path such as `t3 ./my-project`. A bare directory name
@@ -58,12 +58,29 @@ update it with `git pull` and a rebuild.
 
 ## Desktop app
 
-Download the Linux AppImage or `.deb` (x64 or arm64) from
+On Linux (x64 or arm64), install the AppImage with:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/mikkelon/t3code/main/scripts/install.sh | sh -s -- --desktop
+```
+
+The installer puts the app in `~/.local/share/t3code/T3-Code.AppImage`, adds T3
+Code to your app menu, installs the `t3` command as described above, and starts
+the app. Set `T3CODE_DESKTOP_DIR` to keep the AppImage elsewhere. Run the command
+again to repair the menu entry or to install the newest release; a running app
+keeps its version until you restart it. To remove the app, run it with
+`--uninstall-desktop` instead of `--desktop`. That keeps the `t3` command, the
+background service and your data; `t3 uninstall` removes the first two.
+
+AppImages need FUSE 2 (`libfuse.so.2`). When it is missing, the installer still
+installs the app and names the package to add: `fuse2` on Arch, `libfuse2t64` on
+Ubuntu 24.04 and Debian 13 (`libfuse2` on older releases), `fuse-libs` on Fedora.
+
+To install by hand, download the AppImage or `.deb` from
 [GitHub Releases](https://github.com/mikkelon/t3code/releases/latest). Make the
 AppImage executable (`chmod +x T3-Code-*.AppImage`) and run it; on Debian and
-Ubuntu, install the `.deb` with `sudo apt install ./T3-Code-*.deb`. On Arch Linux,
-use the AppImage. The winget, Homebrew and AUR packages install upstream T3 Code,
-not this fork. This fork publishes no macOS or Windows desktop builds; see
+Ubuntu, install the `.deb` with `sudo apt install ./T3-Code-*.deb`. The winget,
+Homebrew and AUR packages install upstream T3 Code, not this fork. This fork publishes no macOS or Windows desktop builds; see
 [Desktop artifacts](../operations/development.md#desktop-artifacts) to build one.
 
 Both Linux builds update themselves from this fork's releases. The `.deb` asks
