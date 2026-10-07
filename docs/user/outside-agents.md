@@ -19,11 +19,12 @@ https://<environment-address>/mcp
 The address must use HTTPS, or `localhost` when the agent runs on the host
 itself. Agents refuse to sign in over a plain `http://` LAN or tailnet address.
 
-- **An agent on your own computers** can use T3 Connect, Tailscale HTTPS, or
-  `localhost` on the host. See [remote access](./remote-access.md).
+- **An agent on your own computers** can use Tailscale HTTPS, or `localhost`
+  on the host. See [remote access](./remote-access.md).
 - **A hosted agent**, such as ChatGPT or a bot running in the cloud, must reach
-  the environment from the internet. Use the T3 Connect address. A Tailscale
-  address only works from your own tailnet.
+  the environment from the internet over HTTPS, for example through Tailscale
+  Funnel or your own reverse proxy that keeps the `Host` header. A Tailscale
+  HTTPS address only works from your own tailnet.
 
 ## Approve a sign-in
 
@@ -75,8 +76,8 @@ codex mcp login t3
 Add the environment as a custom MCP app in ChatGPT's apps settings:
 
 1. Create a new app or plugin with a custom MCP server.
-2. Set the server URL to `https://<environment-address>/mcp`, using the T3
-   Connect address.
+2. Set the server URL to `https://<environment-address>/mcp`, using the
+   environment's public HTTPS address.
 3. Choose **OAuth** for authentication. ChatGPT discovers the rest; you do not
    need a client ID or secret.
 4. Create the app, then approve the sign-in page that opens.
