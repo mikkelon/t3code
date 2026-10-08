@@ -172,7 +172,14 @@ function lastMeaningfulLine(output: string): string | undefined {
     .findLast((line) => line.length > 0);
 }
 
-const SessionFile = Schema.Struct({ environmentId: Schema.String, token: Schema.String });
+// A session keeps the permissions it was issued with, and a newer server may
+// guard actions with permissions an older one never granted. A stored session
+// therefore only serves the server version that issued it.
+const SessionFile = Schema.Struct({
+  environmentId: Schema.String,
+  serverVersion: Schema.optionalKey(Schema.String),
+  token: Schema.String,
+});
 const decodeSessionFile = Schema.decodeUnknownOption(Schema.fromJsonString(SessionFile));
 const encodeSessionFile = Schema.encodeSync(Schema.fromJsonString(SessionFile));
 const IssuedSession = Schema.Struct({ token: Schema.String });
@@ -251,7 +258,9 @@ const make = Effect.gen(function* () {
   const logPath = path.join(environment.stateDir, "logs", "boot-service.log");
 
   const adoptedRef = yield* Ref.make(Option.none<AdoptedServer>());
-  const tokenRef = yield* Ref.make(Option.none<string>());
+  const tokenRef = yield* Ref.make(
+    Option.none<{ readonly serverVersion: string; readonly token: string }>(),
+  );
   const tokenLock = yield* Semaphore.make(1);
   const updateRef = yield* Ref.make<DesktopBackgroundServiceUpdate>({ status: "none" });
   // Why this launch runs the app's own backend instead of the service.
@@ -384,7 +393,11 @@ const make = Effect.gen(function* () {
       Effect.option,
       Effect.map((raw) =>
         Option.flatMap(raw, decodeSessionFile).pipe(
-          Option.filter((session) => session.environmentId === server.environmentId),
+          Option.filter(
+            (session) =>
+              session.environmentId === server.environmentId &&
+              session.serverVersion === server.serverVersion,
+          ),
           Option.map((session) => session.token),
         ),
       ),
@@ -428,7 +441,11 @@ const make = Effect.gen(function* () {
     yield* fs
       .writeFileString(
         sessionPath,
-        `${encodeSessionFile({ environmentId: server.environmentId, token: issued.value.token })}\n`,
+        `${encodeSessionFile({
+          environmentId: server.environmentId,
+          serverVersion: server.serverVersion,
+          token: issued.value.token,
+        })}\n`,
         { mode: 0o600 },
       )
       .pipe(
@@ -443,13 +460,15 @@ const make = Effect.gen(function* () {
     tokenLock.withPermits(1)(
       Effect.gen(function* () {
         const cached = yield* Ref.get(tokenRef);
-        if (Option.isSome(cached)) return cached.value;
+        if (Option.isSome(cached) && cached.value.serverVersion === server.serverVersion) {
+          return cached.value.token;
+        }
         const persisted = yield* readPersistedToken(server);
         const token =
           Option.isSome(persisted) && (yield* tokenStillValid(server, persisted.value))
             ? persisted.value
             : yield* issueToken(server);
-        yield* Ref.set(tokenRef, Option.some(token));
+        yield* Ref.set(tokenRef, Option.some({ serverVersion: server.serverVersion, token }));
         return token;
       }),
     );
