@@ -940,6 +940,37 @@ describe("ClaudeAdapterV2 session permissions", () => {
       },
     ]);
   });
+  it("accepts a never-remember ask once even when accepted for the session", () => {
+    const result = ClaudeAdapterV2.permissionResultFromDecision({
+      toolName: "mcp__vault__grant_access",
+      decision: "acceptForSession",
+      toolInput: {},
+      toolUseID: "tool-3",
+      suggestions: [],
+      suppressAlwaysAllowRule: true,
+    });
+
+    assert.equal(result.behavior, "allow");
+    if (result.behavior !== "allow") {
+      return;
+    }
+    assert.equal(result.updatedPermissions, undefined);
+    assert.equal(result.decisionClassification, "user_temporary");
+  });
+
+  it("recognises MCP asks that require user interaction", () => {
+    assert.isTrue(
+      ClaudeAdapterV2.claudeAskRequiresUserInteraction("mcp__vault__grant_access", {
+        suppressAlwaysAllowRule: true,
+      }),
+    );
+    assert.isFalse(
+      ClaudeAdapterV2.claudeAskRequiresUserInteraction("mcp__vault__grant_access", {}),
+    );
+    assert.isFalse(
+      ClaudeAdapterV2.claudeAskRequiresUserInteraction("Bash", { suppressAlwaysAllowRule: true }),
+    );
+  });
 });
 
 describe("ClaudeAdapterV2 Auto-accept edits", () => {
@@ -1047,6 +1078,137 @@ describe("ClaudeAdapterV2 Auto-accept edits", () => {
           decision: "accept",
         });
         assert.equal((yield* Fiber.join(decision))?.behavior, "allow");
+      }).pipe(Effect.provide(Layer.merge(IdAllocator.layer, NodeServices.layer))),
+    ),
+  );
+});
+
+describe("ClaudeAdapterV2 MCP tools that require user interaction", () => {
+  it.effect("asks in full access before running a flagged MCP tool", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const fileSystem = yield* FileSystem.FileSystem;
+        const idAllocator = yield* IdAllocator.IdAllocatorV2;
+        const attachmentsDir = yield* fileSystem.makeTempDirectoryScoped({
+          prefix: "t3-claude-requires-ui-",
+        });
+        let openedOptions: ClaudeAdapterV2.ClaudeAgentSdkQueryOptions | undefined;
+        const adapter = ClaudeAdapterV2.makeClaudeAdapterV2({
+          instanceId: ClaudeAdapterV2.CLAUDE_DEFAULT_INSTANCE_ID,
+          settings: DEFAULT_CLAUDE_SETTINGS,
+          environment: {},
+          attachmentsDir,
+          fileSystem,
+          path: yield* Path.Path,
+          crypto: yield* Crypto.Crypto,
+          idAllocator,
+          queryRunner: {
+            allocateSessionId: Effect.succeed("native-thread-claude-requires-ui"),
+            open: (input) =>
+              Effect.sync(() => {
+                openedOptions = input.options;
+                return {
+                  messages: Stream.never,
+                  offer: () => Effect.void,
+                  setModel: () => Effect.void,
+                  setPermissionMode: () => Effect.void,
+                  interrupt: Effect.void,
+                  close: Effect.void,
+                };
+              }),
+            forkSession: () => Effect.die("unused"),
+            subagentLaunchToolUseId: () => Effect.succeed(null),
+            assertComplete: Effect.void,
+          },
+        });
+        const runtimePolicy = ProviderAdapterV2RuntimePolicy.make({
+          runtimeMode: "full-access",
+          interactionMode: "default",
+          cwd: "/workspace",
+        });
+        const threadId = ThreadId.make("thread-claude-requires-ui");
+        const runtime = yield* adapter.openSession({
+          threadId,
+          providerSessionId: ProviderSessionId.make("provider-session-claude-requires-ui"),
+          modelSelection: CLAUDE_TEST_MODEL_SELECTION,
+          runtimePolicy,
+        });
+        const providerThread = yield* runtime.ensureThread({
+          threadId,
+          modelSelection: CLAUDE_TEST_MODEL_SELECTION,
+          runtimePolicy,
+        });
+        const now = yield* DateTime.now;
+        yield* runtime.startTurn(
+          makeClaudeTestTurnInput({
+            threadId,
+            providerThread,
+            now,
+            attemptId: RunAttemptId.make("attempt-claude-requires-ui"),
+            text: "Run node.",
+            attachments: [],
+            runtimePolicy,
+          }),
+        );
+        assert.equal(openedOptions?.permissionMode, "bypassPermissions");
+        const canUseTool = openedOptions?.canUseTool;
+        assert.isFunction(canUseTool);
+
+        const requestEvent = yield* runtime.events.pipe(
+          Stream.filter((event) => event.type === "runtime_request.updated"),
+          Stream.runHead,
+          Effect.forkScoped,
+        );
+        // An unflagged MCP ask is still answered at once in full access.
+        const plain = yield* Effect.promise(() =>
+          canUseTool!(
+            "mcp__vault__echo",
+            { text: "hi" },
+            {
+              signal: new AbortController().signal,
+              toolUseID: "tool-mcp-plain",
+              requestId: "request-mcp-plain",
+            },
+          ),
+        );
+        assert.equal(plain.behavior, "allow");
+
+        const decision = yield* Effect.promise(() =>
+          canUseTool!(
+            "mcp__vault__grant_access",
+            { resource: "vault" },
+            {
+              signal: new AbortController().signal,
+              toolUseID: "tool-mcp-grant",
+              requestId: "request-mcp-grant",
+              suggestions: [],
+              suppressAlwaysAllowRule: true,
+            },
+          ),
+        ).pipe(Effect.forkScoped);
+        // Claude Code sends a flagged tool here even under bypassPermissions;
+        // the call must wait for the user instead of being allowed.
+        const first = yield* Effect.raceFirst(
+          Fiber.join(requestEvent).pipe(
+            Effect.map((event) => ({ type: "request", event }) as const),
+          ),
+          Fiber.join(decision).pipe(
+            Effect.map((result) => ({ type: "decision", result }) as const),
+          ),
+        );
+        assert.equal(first.type, "request", "the flagged MCP tool ran without asking");
+        if (first.type !== "request") return;
+        const event = first.event;
+        if (Option.isNone(event) || event.value.type !== "runtime_request.updated") return;
+
+        yield* runtime.respondToRuntimeRequest({
+          requestId: event.value.runtimeRequest.id,
+          decision: "acceptForSession",
+        });
+        const result = yield* Fiber.join(decision);
+        assert.equal(result?.behavior, "allow");
+        if (result?.behavior !== "allow") return;
+        assert.equal(result.updatedPermissions, undefined);
       }).pipe(Effect.provide(Layer.merge(IdAllocator.layer, NodeServices.layer))),
     ),
   );
