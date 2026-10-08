@@ -22057,6 +22057,10 @@ describe("ClaudeAdapterV2 MCP tools that require user interaction", () => {
                     setPermissionMode: () => Effect.void,
                     backgroundTasks: () => Effect.succeed(false),
                     stopTask: () => Effect.void,
+                    mcpServerStatus: Effect.succeed([]),
+                    readMcpResource: () => Effect.die("unexpected MCP resource read"),
+                    callMcpTool: () => Effect.die("unexpected MCP tool call"),
+                    listPermissionRules: Effect.die("unexpected permission rules read"),
                     interrupt: Effect.void,
                     close: Effect.void,
                   };
@@ -22116,7 +22120,7 @@ describe("ClaudeAdapterV2 MCP tools that require user interaction", () => {
                 },
               ),
             );
-            assert.equal(plain.behavior, "allow");
+            assert.equal(plain?.behavior, "allow");
           }
 
           const decision = yield* Effect.promise(() =>
