@@ -2645,6 +2645,17 @@ function requiresClaudeApproval(context: ActiveClaudeTurnContext): boolean {
   return policy.installPermissionCallback || policy.permissionMode === "bypassPermissions";
 }
 
+// MCP tools marked `_meta["anthropic/requiresUserInteraction"]` ask even under
+// bypassPermissions because the prompt is the point (consent, access grants). The SDK
+// drops the annotation but sets `suppressAlwaysAllowRule`, so such an ask must reach the
+// user in every runtime mode and must not be remembered for the session.
+function claudeAskRequiresUserInteraction(
+  toolName: string,
+  callbackOptions: Pick<Parameters<CanUseTool>[2], "suppressAlwaysAllowRule">,
+): boolean {
+  return toolName.startsWith("mcp__") && callbackOptions.suppressAlwaysAllowRule === true;
+}
+
 function claudeRuntimeQueryPolicyKey(policy: ClaudeRuntimeQueryPolicy): string {
   return JSON.stringify({
     permissionMode: policy.permissionMode,
@@ -3378,15 +3389,19 @@ export function permissionResultFromDecision(input: {
   readonly toolUseID: string;
   readonly suggestions?: Parameters<CanUseTool>[2]["suggestions"];
   readonly feedback?: string;
+  readonly suppressAlwaysAllowRule?: boolean;
 }): PermissionResult {
   if (input.decision === "accept" || input.decision === "acceptForSession") {
+    // Claude Code forbids remembering some asks; accepting one for the session
+    // then counts as accepting it once.
+    const rememberForSession =
+      input.decision === "acceptForSession" && input.suppressAlwaysAllowRule !== true;
     return {
       behavior: "allow",
       updatedInput: input.toolInput,
       toolUseID: input.toolUseID,
-      decisionClassification:
-        input.decision === "acceptForSession" ? "user_permanent" : "user_temporary",
-      ...(input.decision === "acceptForSession"
+      decisionClassification: rememberForSession ? "user_permanent" : "user_temporary",
+      ...(rememberForSession
         ? {
             updatedPermissions: toSessionPermissionUpdates(input.toolName, input.suggestions),
           }
@@ -9493,6 +9508,9 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
           const nativeRequestId = callbackOptions.toolUseID;
           const nativeToolInput = claudeNativeToolInputFromRecord(toolInput);
           const heldForEcho = context.heldRootFrames.length > 0;
+          const mustAsk =
+            requiresClaudeApproval(context) ||
+            claudeAskRequiresUserInteraction(toolName, callbackOptions);
           if (toolName === "Agent") {
             rememberClaudeSubagentLaunch(
               subagentModelCatalog,
@@ -9515,7 +9533,7 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
           if (
             heldForEcho &&
             toolName !== "ExitPlanMode" &&
-            (toolName === "AskUserQuestion" || requiresClaudeApproval(context))
+            (toolName === "AskUserQuestion" || mustAsk)
           ) {
             // The SDK blocks prompt echoes on permission answers; release held output except for ExitPlanMode.
             yield* releaseHeldRootFrames(context);
@@ -9627,7 +9645,7 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
             } satisfies PermissionResult;
           }
 
-          if (!requiresClaudeApproval(context)) {
+          if (!mustAsk) {
             return {
               behavior: "allow",
               updatedInput: toolInput,
@@ -9708,6 +9726,9 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
             ...(callbackOptions.suggestions === undefined
               ? {}
               : { suggestions: callbackOptions.suggestions }),
+            ...(callbackOptions.suppressAlwaysAllowRule === true
+              ? { suppressAlwaysAllowRule: true }
+              : {}),
           });
         });
 
