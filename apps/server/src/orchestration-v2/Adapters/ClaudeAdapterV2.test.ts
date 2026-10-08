@@ -13349,3 +13349,147 @@ describe("ClaudeAdapterV2 query message stream", () => {
     }),
   );
 });
+
+describe("ClaudeAdapterV2 MCP tools that require user interaction", () => {
+  // Full access already asks for every forwarded call; Auto would allow the
+  // flagged tool at once without the suppressAlwaysAllowRule check.
+  it.effect.each([
+    { runtimeMode: "auto", permissionMode: "auto" },
+    { runtimeMode: "full-access", permissionMode: "bypassPermissions" },
+  ] as const)(
+    "asks in $runtimeMode before running a flagged MCP tool",
+    ({ runtimeMode, permissionMode }) =>
+      Effect.scoped(
+        Effect.gen(function* () {
+          const fileSystem = yield* FileSystem.FileSystem;
+          const idAllocator = yield* IdAllocator.IdAllocatorV2;
+          const attachmentsDir = yield* fileSystem.makeTempDirectoryScoped({
+            prefix: "t3-claude-requires-ui-",
+          });
+          let openedOptions: ClaudeAdapterV2.ClaudeAgentSdkQueryOptions | undefined;
+          const adapter = yield* ClaudeAdapterV2.makeClaudeAdapterV2({
+            instanceId: ClaudeAdapterV2.CLAUDE_DEFAULT_INSTANCE_ID,
+            settings: DEFAULT_CLAUDE_SETTINGS,
+            environment: {},
+            attachmentsDir,
+            fileSystem,
+            path: yield* Path.Path,
+            crypto: yield* Crypto.Crypto,
+            idAllocator,
+            queryRunner: {
+              allocateSessionId: Effect.succeed("native-thread-claude-requires-ui"),
+              open: (input) =>
+                Effect.sync(() => {
+                  openedOptions = input.options;
+                  return {
+                    messages: Stream.never,
+                    offer: () => Effect.void,
+                    setModel: () => Effect.void,
+                    applyFlagSettings: () => Effect.void,
+                    setPermissionMode: () => Effect.void,
+                    backgroundTasks: () => Effect.succeed(false),
+                    stopTask: () => Effect.void,
+                    interrupt: Effect.void,
+                    close: Effect.void,
+                  };
+                }),
+              forkSession: () => Effect.die("unused"),
+              subagentLaunchToolUseId: () => Effect.succeed(null),
+              assertComplete: Effect.void,
+            },
+          });
+          const runtimePolicy = ProviderAdapter.ProviderAdapterV2RuntimePolicy.make({
+            runtimeMode,
+            interactionMode: "default",
+            cwd: "/workspace",
+          });
+          const threadId = ThreadId.make("thread-claude-requires-ui");
+          const runtime = yield* adapter.openSession({
+            threadId,
+            providerSessionId: ProviderSessionId.make("provider-session-claude-requires-ui"),
+            modelSelection: CLAUDE_TEST_MODEL_SELECTION,
+            runtimePolicy,
+          });
+          const providerThread = yield* runtime.ensureThread({
+            threadId,
+            modelSelection: CLAUDE_TEST_MODEL_SELECTION,
+            runtimePolicy,
+          });
+          const now = yield* DateTime.now;
+          yield* runtime.startTurn(
+            makeClaudeTestTurnInput({
+              threadId,
+              providerThread,
+              now,
+              attemptId: RunAttemptId.make("attempt-claude-requires-ui"),
+              text: "Run node.",
+              attachments: [],
+              runtimePolicy,
+            }),
+          );
+          assert.equal(openedOptions?.permissionMode, permissionMode);
+          const canUseTool = openedOptions?.canUseTool;
+          assert.isFunction(canUseTool);
+
+          const requestEvent = yield* runtime.events.pipe(
+            Stream.filter((event) => event.type === "runtime_request.updated"),
+            Stream.runHead,
+            Effect.forkScoped,
+          );
+          if (runtimeMode === "auto") {
+            const plain = yield* Effect.promise(() =>
+              canUseTool!(
+                "mcp__vault__echo",
+                { text: "hi" },
+                {
+                  signal: new AbortController().signal,
+                  toolUseID: "tool-mcp-plain",
+                  requestId: "request-mcp-plain",
+                },
+              ),
+            );
+            assert.equal(plain.behavior, "allow");
+          }
+
+          const decision = yield* Effect.promise(() =>
+            canUseTool!(
+              "mcp__vault__grant_access",
+              { resource: "vault" },
+              {
+                signal: new AbortController().signal,
+                toolUseID: "tool-mcp-grant",
+                requestId: "request-mcp-grant",
+                suggestions: [],
+                suppressAlwaysAllowRule: true,
+              },
+            ),
+          ).pipe(Effect.forkScoped);
+          const first = yield* Effect.raceFirst(
+            Fiber.join(requestEvent).pipe(
+              Effect.map((event) => ({ type: "request", event }) as const),
+            ),
+            Fiber.join(decision).pipe(
+              Effect.map((result) => ({ type: "decision", result }) as const),
+            ),
+          );
+          assert.equal(first.type, "request", "the flagged MCP tool ran without asking");
+          if (first.type !== "request") return;
+          const event = first.event;
+          if (Option.isNone(event) || event.value.type !== "runtime_request.updated") return;
+
+          yield* runtime.respondToRuntimeRequest({
+            requestId: event.value.runtimeRequest.id,
+            decision: "acceptForSession",
+          });
+          const result = yield* Fiber.join(decision);
+          assert.equal(result?.behavior, "allow");
+          if (result?.behavior !== "allow") return;
+          assert.equal(result.updatedPermissions, undefined);
+        }).pipe(
+          Effect.provide(
+            Layer.mergeAll(IdAllocator.layer, McpProviderSessions.layer, NodeServices.layer),
+          ),
+        ),
+      ),
+  );
+});
