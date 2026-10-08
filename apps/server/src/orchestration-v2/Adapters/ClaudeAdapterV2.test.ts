@@ -1244,7 +1244,7 @@ describe("ClaudeAdapterV2 MCP tools that require user interaction", () => {
             },
           ),
         );
-        assert.equal(plain.behavior, "allow");
+        assert.equal(plain?.behavior, "allow");
 
         const decision = yield* Effect.promise(() =>
           canUseTool!(
