@@ -409,6 +409,36 @@ describe("DesktopBackgroundService", () => {
       }),
     );
 
+    it.effect("issues a new session when the stored one predates the running server", () =>
+      Effect.gen(function* () {
+        const { harness, layer } = yield* makeHarness({
+          onCommand: () => succeed(issuedSessionOutput("token-2")),
+          shipsRuntime: false,
+        });
+        yield* writeRuntimeState(harness);
+        // Written by an app that did not record the server version: its
+        // session lacks whatever the running server added since.
+        const fs = yield* FileSystem.FileSystem;
+        yield* fs.writeFileString(
+          `${harness.stateDir}/desktop-service-session.json`,
+          `${JSON.stringify({ environmentId: "env-home", token: "token-1" })}\n`,
+        );
+        const launch = Effect.gen(function* () {
+          const service = yield* DesktopBackgroundService.DesktopBackgroundService;
+          assert.equal(yield* service.adopt(yield* service.decide), "adopted");
+          return yield* service.getBearerToken;
+        }).pipe(Effect.provide(layer));
+
+        assert.equal(yield* launch, "token-2");
+        assert.equal(yield* launch, "token-2");
+        assert.equal(cli(harness, "auth session issue").length, 1);
+        const stored = JSON.parse(
+          yield* fs.readFileString(`${harness.stateDir}/desktop-service-session.json`),
+        );
+        assert.equal(stored.serverVersion, serverPackageJson.version);
+      }),
+    );
+
     it.effect("never stops, restarts or cleans up an adopted server when the app quits", () =>
       Effect.gen(function* () {
         const { harness, layer } = yield* makeHarness({
