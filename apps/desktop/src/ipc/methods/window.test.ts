@@ -230,7 +230,7 @@ describe("getRelayTelemetryEnabled", () => {
           }),
         ),
       );
-      assert.isTrue(
+      assert.isFalse(
         yield* getRelayTelemetryEnabled
           .handler()
           .pipe(Effect.provideService(HostProcess.Environment, {})),
