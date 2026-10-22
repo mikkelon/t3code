@@ -320,26 +320,31 @@ describe("installRelayTelemetryEnabled", () => {
       return { beforeDiscovery, afterDiscovery: ask() };
     }).pipe(Effect.scoped);
 
-  it.effect("reads the desktop host opt-out before returning the renderer policy", () =>
+  it.effect("keeps relay tracing off unless the desktop host opts in", () =>
     Effect.gen(function* () {
+      // Undecided until the login shell is read, so the renderer asks again; tracing stays off.
       assert.deepEqual(yield* relayTelemetryEnabled({ T3CODE_TELEMETRY_ENABLED: "false" }), {
-        beforeDiscovery: false,
+        beforeDiscovery: null,
         afterDiscovery: false,
       });
-      // Undecided until the login shell is read, so the renderer asks again instead of opting out.
       assert.deepEqual(yield* relayTelemetryEnabled({}), {
+        beforeDiscovery: null,
+        afterDiscovery: false,
+      });
+      assert.deepEqual(yield* relayTelemetryEnabled({ T3CODE_TELEMETRY_ENABLED: "true" }), {
         beforeDiscovery: null,
         afterDiscovery: true,
       });
       assert.deepEqual(
-        yield* relayTelemetryEnabled({}, undefined, { T3CODE_TELEMETRY_ENABLED: "false" }),
-        { beforeDiscovery: null, afterDiscovery: false },
+        yield* relayTelemetryEnabled({}, undefined, { T3CODE_TELEMETRY_ENABLED: "true" }),
+        { beforeDiscovery: null, afterDiscovery: true },
       );
     }),
   );
 
   it.effect("turns relay tracing off when the managed policy turns telemetry off", () =>
     Effect.gen(function* () {
+      const optedIn = { T3CODE_TELEMETRY_ENABLED: "true" };
       const policy = (limits: ManagedPolicyLimits) => ({
         schemaVersion: 1 as const,
         organization: "Example Corp",
@@ -348,11 +353,11 @@ describe("installRelayTelemetryEnabled", () => {
       const after = function* (...args: Parameters<typeof relayTelemetryEnabled>) {
         return (yield* relayTelemetryEnabled(...args)).afterDiscovery;
       };
-      assert.isFalse(yield* after({}, policy({ telemetry: false })));
-      assert.isTrue(yield* after({}, policy({ webhookTasks: false })));
+      assert.isFalse(yield* after(optedIn, policy({ telemetry: false })));
+      assert.isTrue(yield* after(optedIn, policy({ webhookTasks: false })));
       // A policy that cannot be read fails closed.
       assert.isFalse(
-        yield* after({}, new ManagedPolicyFileError({ path: "/test", reason: "bad JSON" })),
+        yield* after(optedIn, new ManagedPolicyFileError({ path: "/test", reason: "bad JSON" })),
       );
     }),
   );
