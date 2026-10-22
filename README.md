@@ -10,6 +10,9 @@ All credit for T3 Code goes to its authors; this fork changes:
   and uses it instead of starting a second backend. The machines and a phone connect to each
   other over the LAN, Tailscale or SSH, and an SSH device host (for example a
   Mac) provides remote iOS simulators and Android emulators.
+- **Product analytics off by default.** Upstream's analytics code is kept, but
+  nothing is sent unless you set `T3CODE_TELEMETRY_ENABLED=true`
+  ([details](./docs/user/telemetry.md)).
 
 Releases, installers and `t3 update` use this repository's
 [GitHub Releases](https://github.com/mikkelon/t3code/releases), never upstream's.
