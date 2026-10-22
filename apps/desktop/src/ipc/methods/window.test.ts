@@ -256,26 +256,28 @@ describe("installRelayTelemetryEnabled", () => {
       return event.returnValue;
     }).pipe(Effect.scoped);
 
-  it.effect("reads the desktop host opt-out before returning the renderer policy", () =>
+  it.effect("keeps relay tracing off unless the desktop host opts in", () =>
     Effect.gen(function* () {
       assert.isFalse(yield* relayTelemetryEnabled({ T3CODE_TELEMETRY_ENABLED: "false" }));
-      assert.isTrue(yield* relayTelemetryEnabled({}));
+      assert.isFalse(yield* relayTelemetryEnabled({}));
+      assert.isTrue(yield* relayTelemetryEnabled({ T3CODE_TELEMETRY_ENABLED: "true" }));
     }),
   );
 
   it.effect("turns relay tracing off when the managed policy turns telemetry off", () =>
     Effect.gen(function* () {
+      const optedIn = { T3CODE_TELEMETRY_ENABLED: "true" };
       const policy = (limits: ManagedPolicyLimits) => ({
         schemaVersion: 1 as const,
         organization: "Example Corp",
         limits,
       });
-      assert.isFalse(yield* relayTelemetryEnabled({}, policy({ telemetry: false })));
-      assert.isTrue(yield* relayTelemetryEnabled({}, policy({ webhookTasks: false })));
+      assert.isFalse(yield* relayTelemetryEnabled(optedIn, policy({ telemetry: false })));
+      assert.isTrue(yield* relayTelemetryEnabled(optedIn, policy({ webhookTasks: false })));
       // A policy that cannot be read fails closed.
       assert.isFalse(
         yield* relayTelemetryEnabled(
-          {},
+          optedIn,
           new ManagedPolicyFileError({ path: "/test", reason: "bad JSON" }),
         ),
       );
