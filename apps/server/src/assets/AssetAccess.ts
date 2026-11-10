@@ -215,6 +215,7 @@ export type ResolvedAsset =
       readonly mimeType?: string;
       readonly file?: OpenMediaFile;
       readonly renderIntent?: "mcp-app";
+      readonly revalidate?: boolean;
     }
   | {
       readonly kind: "bytes";
@@ -1091,5 +1092,8 @@ export const resolveAsset = Effect.fn("AssetAccess.resolveAsset")(function* (
     relativePath: joinedRelativePath,
     previewDependency: true,
   });
-  return workspaceFile ? ({ kind: "file", path: workspaceFile } satisfies ResolvedAsset) : null;
+  // Pages load siblings by relative URL, which never carries the revision that keeps edits fresh.
+  return workspaceFile
+    ? ({ kind: "file", path: workspaceFile, revalidate: true } satisfies ResolvedAsset)
+    : null;
 });
