@@ -50,8 +50,18 @@ service to the new version once no agents are running. A service you installed w
 **Don't run agents in the background** under
 **Settings → Environments → Background service → Advanced**.
 
-The fork publishes no macOS or Windows desktop builds and no Windows CLI. Build
-them from source if you need them (see below).
+### Desktop app (Windows)
+
+Download `T3-Code-<version>-x64.exe` (or `-arm64.exe`) from
+[Releases](https://github.com/mikkelon/t3code/releases/latest) and run it. The
+installer is unsigned, so SmartScreen warns on first install: choose **More info**,
+then **Run anyway**. The app updates itself from this fork's releases. There is no
+background service on Windows; agents run inside the app. For the CLI alone, run
+`irm https://raw.githubusercontent.com/mikkelon/t3code/main/scripts/install.ps1 | iex`
+in PowerShell.
+
+The fork publishes no macOS desktop build. Build it from source if you need it
+(see below).
 
 ### Command line and background service (Linux, Apple Silicon Mac)
 
@@ -154,12 +164,16 @@ rules that keep the fork cheap to rebase.
 
 Run **Fork release** from the Actions tab, or push a tag such as `v0.0.46-mk.1`.
 [`fork-release.yml`](./.github/workflows/fork-release.yml) builds on GitHub-hosted
-runners and publishes a release with CLI archives for `linux-x64`, `linux-arm64`
-and `darwin-arm64`, `SHA256SUMS`, and the Linux AppImage and `.deb` (x64, arm64)
-with their update manifests. Builds are unsigned: Linux does not need signing,
-and there are no macOS or Windows desktop builds because unsigned ones cannot
-update themselves (macOS) or warn on every install (Windows). Upstream's
-`release.yml` stays in the tree, trigger-less, so rebases stay clean.
+runners and publishes a release with CLI archives for `linux-x64`, `linux-arm64`,
+`darwin-arm64`, `win32-x64` and `win32-arm64`, `SHA256SUMS`, the Linux AppImage
+and `.deb` (x64, arm64) and the Windows installer (x64, arm64) with their update
+manifests. Builds are unsigned: Linux does not need signing, Windows shows a
+SmartScreen warning on first install but still updates, and there is no macOS
+desktop build because an unsigned one cannot update itself. Upstream's
+`release.yml` stays in the tree, trigger-less, so rebases stay clean. A pull
+request that touches `fork-release.yml` or the build scripts it runs builds and
+verifies everything as `0.0.0-mk.1`, uploads the result as the `release-dry-run`
+artifact, and publishes nothing.
 
 If a release fails to publish, fix the workflow, then run **Fork release** with
 the same version (it rebuilds the commit the existing tag points to, using the
