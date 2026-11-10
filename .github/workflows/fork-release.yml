@@ -6,24 +6,41 @@ name: Fork release
 # the fork does not run it.
 #
 # A release carries:
-# - CLI archives for linux-x64, linux-arm64 and darwin-arm64 plus SHA256SUMS,
-#   which the install scripts, `t3 update`, the background service and
-#   desktop-managed SSH environments download (names from
-#   packages/shared/src/cliRelease.ts).
+# - CLI archives for linux-x64, linux-arm64, darwin-arm64, win32-x64 and
+#   win32-arm64 plus SHA256SUMS, which the install scripts, `t3 update`, the
+#   background service and desktop-managed SSH environments download (names
+#   from packages/shared/src/cliRelease.ts).
 # - The Linux desktop app (AppImage and .deb, x64 and arm64) with the
 #   latest-linux*.yml manifests electron-updater follows. Each embeds the CLI
 #   archive of its architecture, which it installs as the background service.
-# There are no Windows builds and no macOS desktop build: without signing
-# identities the macOS app cannot update itself and Windows warns on every
-# install. Versions are <core>-mk.<n>; see scripts/resolve-fork-release.ts.
+# - The Windows desktop app (NSIS installer, x64 and arm64) with its
+#   .blockmap files and latest.yml. Each embeds the Linux CLI archive of its
+#   architecture as the WSL runtime. Windows builds are unsigned, so Windows
+#   shows a SmartScreen warning on first install; updates still install
+#   because an unsigned build names no publisher for electron-updater to check.
+# There is no macOS desktop build: without a signing identity the macOS app
+# cannot update itself. Versions are <core>-mk.<n>; see
+# scripts/resolve-fork-release.ts.
 #
 # Run it from the Actions tab (the version defaults to the next -mk.<n> for
-# the selected commit), or push a v<core>-mk.<n> tag.
+# the selected commit), or push a v<core>-mk.<n> tag. A pull request that
+# changes this workflow or the scripts it runs builds and verifies everything
+# as version 0.0.0-mk.1 and publishes nothing.
 
 on:
   push:
     tags:
       - "v*.*.*-mk.*"
+  pull_request:
+    paths:
+      - .github/workflows/fork-release.yml
+      - scripts/build-cli-archive.ts
+      - scripts/build-desktop-artifact.ts
+      - scripts/merge-update-manifests.ts
+      - scripts/resolve-fork-release.ts
+      - scripts/smoke-cli-archive.ts
+      - scripts/verify-windows-desktop-artifact.ts
+      - scripts/install.ps1
   workflow_dispatch:
     inputs:
       version:
@@ -32,8 +49,8 @@ on:
         type: string
 
 concurrency:
-  group: fork-release
-  cancel-in-progress: false
+  group: ${{ github.event_name == 'pull_request' && format('fork-release-{0}', github.ref) || 'fork-release' }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 permissions:
   contents: read
@@ -41,6 +58,9 @@ permissions:
 jobs:
   prepare:
     name: Resolve release version
+    # Dry runs only for pull requests from branches of this repository, so
+    # outside pull requests don't start the full Windows/Linux/macOS build.
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     outputs:
@@ -70,7 +90,8 @@ jobs:
       - id: version
         name: Resolve version
         env:
-          REQUESTED: ${{ github.event_name == 'push' && github.ref_name || inputs.version }}
+          # No real release has core 0.0.0, so a dry run never matches a tag.
+          REQUESTED: ${{ github.event_name == 'push' && github.ref_name || github.event_name == 'pull_request' && '0.0.0-mk.1' || inputs.version }}
         run: node scripts/resolve-fork-release.ts --requested "$REQUESTED" --github-output
 
       # A dispatched release creates its tag on the commit it builds. When the
@@ -380,14 +401,387 @@ jobs:
           path: release-cli/*
           if-no-files-found: error
 
+  # Upstream's recipe: Windows packages on Linux (electron-builder needs no
+  # wine, cargo-xwin links the resource monitor, the CLI executable embeds a
+  # Node downloaded from nodejs.org), and windows_verify runs the result on
+  # Windows. No Azure Trusted Signing secrets are passed, so the installer and
+  # t3.exe are unsigned.
+  windows:
+    name: Windows ${{ matrix.arch }}
+    needs: [prepare, build_bundle, linux]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    strategy:
+      fail-fast: true
+      matrix:
+        include:
+          - arch: x64
+            rust_target: x86_64-pc-windows-msvc
+          - arch: arm64
+            rust_target: aarch64-pc-windows-msvc
+    env:
+      VERSION: ${{ needs.prepare.outputs.version }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ needs.prepare.outputs.ref }}
+          sparse-checkout: |
+            /*
+            !/.repos/
+          sparse-checkout-cone-mode: false
+
+      - name: Setup Vite+
+        uses: voidzero-dev/setup-vp@v1
+        with:
+          node-version-file: package.json
+          cache: true
+          run-install: |
+            args:
+              - --filter=@t3tools/desktop...
+              - --filter=t3...
+              - --filter=@t3tools/scripts...
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master
+        with:
+          toolchain: stable
+          targets: ${{ matrix.rust_target }}
+
+      - name: Install cargo-xwin
+        uses: taiki-e/install-action@cfdb7ed4ccc7c7dce37759eae89dc5674b469b39 # v2.90.3
+        with:
+          tool: cargo-xwin@0.23.1
+
+      - name: Align package versions to release version
+        run: node scripts/update-release-package-versions.ts "$VERSION"
+
+      - name: Download JS bundle
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: js-bundle
+          path: apps
+
+      - name: Build resource monitor
+        run: cargo xwin build --locked --release --manifest-path native/resource-monitor/Cargo.toml --target ${{ matrix.rust_target }}
+
+      - name: Apply web client branding
+        run: node scripts/apply-web-brand-assets.ts production apps/server/dist/client
+
+      # build-exe embeds the target's node.exe of the engines.node version.
+      # tsdown fetches it once without retrying, so seed its cache instead.
+      - name: Download target Node.js for the CLI executable
+        run: |
+          set -euo pipefail
+          node_version=$(node -p 'require("./package.json").engines.node')
+          name="node-v$node_version-win-${{ matrix.arch }}"
+          dir="$RUNNER_TEMP/node-download"
+          dest="${XDG_CACHE_HOME:-$HOME/.cache}/tsdown/node/v$node_version/win-${{ matrix.arch }}"
+          mkdir -p "$dir" "$dest"
+          fetch=(curl -fsSL --retry 5 --retry-all-errors --connect-timeout 10 --speed-limit 102400 --speed-time 30)
+          "${fetch[@]}" -o "$dir/$name.zip" "https://nodejs.org/dist/v$node_version/$name.zip"
+          "${fetch[@]}" -o "$dir/SHASUMS256.txt" "https://nodejs.org/dist/v$node_version/SHASUMS256.txt"
+          (cd "$dir" && grep " $name.zip\$" SHASUMS256.txt | sha256sum -c -)
+          unzip -p "$dir/$name.zip" "$name/node.exe" > "$dest/node.exe"
+
+      - name: Build CLI single-executable
+        run: node apps/server/scripts/cli.ts build-exe --verbose --target win-${{ matrix.arch }}
+
+      - name: Build CLI archive
+        run: |
+          set -euo pipefail
+          monitor_dir="$RUNNER_TEMP/cli-resource-monitor/win32-${{ matrix.arch }}"
+          mkdir -p "$monitor_dir"
+          cp "native/resource-monitor/target/${{ matrix.rust_target }}/release/t3-resource-monitor.exe" "$monitor_dir/"
+          node scripts/build-cli-archive.ts \
+            --platform win \
+            --arch "${{ matrix.arch }}" \
+            --version "$VERSION" \
+            --resource-monitor-dir "$RUNNER_TEMP/cli-resource-monitor" \
+            --output-dir release-cli
+
+      - name: Download Linux CLI archive for WSL
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: cli-linux-${{ matrix.arch }}
+          path: wsl-runtime
+
+      # GITHUB_REPOSITORY gives the build its update feed (this repository's
+      # releases). The build refuses a WSL runtime for another version or
+      # architecture.
+      - name: Build desktop artifact
+        env:
+          T3CODE_DESKTOP_REUSE_RESOURCE_MONITOR: "true"
+        run: |
+          vp run dist:desktop:artifact \
+            --platform win \
+            --target nsis \
+            --arch "${{ matrix.arch }}" \
+            --build-version "$VERSION" \
+            --wsl-runtime "wsl-runtime/t3-$VERSION-linux-${{ matrix.arch }}.tar.gz" \
+            --skip-build \
+            --verbose
+
+      # electron-builder names the feed latest.yml for both architectures, so
+      # each is renamed here and the release job merges them.
+      - name: Collect desktop assets
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          installers=(release/*.exe)
+          if [[ ${#installers[@]} -ne 1 ]]; then
+            echo "::error::Expected one installer, found: ${installers[*]}" >&2
+            exit 1
+          fi
+          installer=${installers[0]}
+          if [[ ! -f "$installer.blockmap" ]]; then
+            echo "::error::$installer.blockmap is missing, so installed apps could not update differentially." >&2
+            exit 1
+          fi
+          if ! grep -qF "url: ${installer#release/}" release/latest.yml; then
+            echo "::error::release/latest.yml is missing or does not list ${installer#release/}." >&2
+            exit 1
+          fi
+          mkdir -p release-publish
+          cp "$installer" "$installer.blockmap" release-publish/
+          cp release/latest.yml "release-publish/latest-win-${{ matrix.arch }}.yml"
+          ls -l release-publish
+
+      # windows_verify runs these with the runner's Node and no checkout.
+      - name: Bundle verification scripts
+        run: |
+          set -euo pipefail
+          mkdir -p release-verify
+          esbuild=scripts/node_modules/.bin/esbuild
+          banner="import{createRequire as __cr}from'node:module';const require=__cr(import.meta.url);"
+          # build-desktop-artifact.ts's own import.meta.main guard must not run
+          # its CLI inside the verify bundle.
+          "$esbuild" scripts/verify-windows-desktop-artifact.ts --bundle --platform=node --format=esm \
+            --target=node24 --define:import.meta.main=false --banner:js="$banner" \
+            --outfile=release-verify/verify-windows-desktop-artifact.mjs
+          "$esbuild" scripts/smoke-cli-archive.ts --bundle --platform=node --format=esm \
+            --target=node24 --banner:js="$banner" --outfile=release-verify/smoke-cli-archive.mjs
+
+      - name: Upload desktop assets
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: desktop-win-${{ matrix.arch }}
+          path: release-publish/*
+          if-no-files-found: error
+          compression-level: 0
+
+      - name: Upload CLI archive
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: cli-win-${{ matrix.arch }}
+          path: release-cli/*
+          if-no-files-found: error
+          compression-level: 0
+
+      - name: Upload verification scripts
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: verify-win-${{ matrix.arch }}
+          path: release-verify/*
+          if-no-files-found: error
+          retention-days: 1
+
+  # Installs and runs the Windows builds on Windows of their own architecture.
+  # Bash and Node rather than PowerShell: PowerShell on Windows ARM crashes
+  # intermittently (https://github.com/dotnet/runtime/issues/131636).
+  windows_verify:
+    name: Verify Windows ${{ matrix.arch }}
+    needs: [prepare, windows]
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: x64
+            runner: windows-2025
+          - arch: arm64
+            runner: windows-11-arm
+    env:
+      VERSION: ${{ needs.prepare.outputs.version }}
+      # Keep Git Bash from rewriting installer switches such as /S into paths.
+      MSYS_NO_PATHCONV: "1"
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Checkout install script
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ needs.prepare.outputs.ref }}
+          sparse-checkout: scripts/install.ps1
+          sparse-checkout-cone-mode: false
+
+      - name: Download desktop assets
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: desktop-win-${{ matrix.arch }}
+          path: desktop
+
+      - name: Download CLI archive
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: cli-win-${{ matrix.arch }}
+          path: release-cli
+
+      - name: Download verification scripts
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: verify-win-${{ matrix.arch }}
+          path: verify
+
+      # A silent NSIS install is per-user and does not start the app.
+      - name: Install desktop app
+        run: |
+          set -euo pipefail
+          "desktop/T3-Code-$VERSION-${{ matrix.arch }}.exe" /S
+          shopt -s nullglob
+          # The exe is named after the product name, e.g. "T3 Code (Beta).exe".
+          apps=()
+          for exe in "$(cygpath -u "$LOCALAPPDATA")"/Programs/*/"T3 Code"*.exe; do
+            [[ "$(basename "$exe")" == Uninstall* ]] || apps+=("$exe")
+          done
+          if [[ ${#apps[@]} -ne 1 ]]; then
+            echo "::error::Expected one installed T3 Code*.exe under %LOCALAPPDATA%\\Programs, found: ${apps[*]}" >&2
+            ls -la "$(cygpath -u "$LOCALAPPDATA")"/Programs/* >&2 || true
+            exit 1
+          fi
+          echo "APP_DIR=$(cygpath -w "$(dirname "${apps[0]}")")" >> "$GITHUB_ENV"
+          echo "APP_EXE_NAME=$(basename "${apps[0]}")" >> "$GITHUB_ENV"
+          echo "Installed ${apps[0]}"
+
+      - name: Check installed version
+        timeout-minutes: 2
+        run: |
+          set -euo pipefail
+          installed=$(ELECTRON_RUN_AS_NODE=1 "$APP_DIR\\$APP_EXE_NAME" -e \
+            'const path = require("node:path"); process.stdout.write(require(path.join(path.dirname(process.execPath), "resources", "app.asar", "package.json")).version)')
+          if [[ "$installed" != "$VERSION" ]]; then
+            echo "::error::The installed app is version '$installed', expected $VERSION." >&2
+            exit 1
+          fi
+          echo "Installed app is $installed."
+
+      - name: Verify packaged natives
+        run: node verify/verify-windows-desktop-artifact.mjs --app-dir "$APP_DIR" --arch "${{ matrix.arch }}" --build-version "$VERSION" --verbose
+
+      # cargo-xwin links this binary on Linux, and nothing else runs it before users do.
+      - name: Smoke-test resource monitor
+        env:
+          EXPECTED_ARCH: ${{ matrix.arch == 'arm64' && 'aarch64' || 'x86_64' }}
+        run: |
+          export MONITOR="$APP_DIR\\resources\\resource-monitor\\t3-resource-monitor.exe"
+          node --input-type=module <<'EOF'
+          import { spawn } from "node:child_process";
+          const monitor = spawn(process.env.MONITOR, { stdio: ["pipe", "pipe", "inherit"] });
+          monitor.stdout.setEncoding("utf8");
+          let output = "";
+          const exited = new Promise((resolve) => monitor.on("close", resolve));
+          const hello = await new Promise((resolve, reject) => {
+            monitor.on("error", reject);
+            monitor.on("close", () => reject(new Error(`Resource monitor exited before hello: ${output}`)));
+            monitor.stdout.on("data", (chunk) => {
+              output += chunk;
+              const end = output.indexOf("\n");
+              if (end !== -1) resolve(JSON.parse(output.slice(0, end)));
+            });
+          });
+          if (hello.type !== "hello" || hello.arch !== process.env.EXPECTED_ARCH) {
+            throw new Error(`Unexpected hello: ${JSON.stringify(hello)}`);
+          }
+          const send = (message) => monitor.stdin.write(`${JSON.stringify({ version: hello.version, ...message })}\n`);
+          send({ type: "configure", rootPid: process.pid, sampleIntervalMs: 1000 });
+          send({ type: "sampleNow", requestId: "verify" });
+          monitor.stdin.end();
+          const exitCode = await exited;
+          const sample = output
+            .split("\n")
+            .filter((line) => line.trim())
+            .map((line) => JSON.parse(line))
+            .find((message) => message.requestId === "verify");
+          if (exitCode !== 0 || sample?.type !== "snapshot" || !sample.processes.some((p) => p.pid === process.pid)) {
+            throw new Error(`Resource monitor exited ${exitCode} with: ${output}`);
+          }
+          console.log(`Resource monitor sampled ${sample.scannedProcessCount} processes.`);
+          EOF
+
+      # The uninstaller copies itself to %TEMP% and returns before it is done;
+      # on the arm64 runner it takes about as long as installing (over 4 min).
+      - name: Uninstall desktop app
+        timeout-minutes: 12
+        run: |
+          set -euo pipefail
+          "$APP_DIR\\Uninstall $APP_EXE_NAME" /S
+          for _ in $(seq 600); do
+            if [[ ! -e "$APP_DIR\\$APP_EXE_NAME" ]]; then
+              echo "Uninstalled."
+              exit 0
+            fi
+            sleep 1
+          done
+          echo "::error::$APP_EXE_NAME is still in $APP_DIR ten minutes after uninstalling." >&2
+          ls -la "$(cygpath -u "$APP_DIR")" >&2 || true
+          tasklist >&2 || true
+          exit 1
+
+      - name: Smoke-test CLI archive
+        run: node verify/smoke-cli-archive.mjs --archive release-cli/* --expect-version "$VERSION"
+
+      # The archive and a SHA256SUMS written like the release job's, served
+      # as a release mirror, so install.ps1 runs as `irm ... | iex` would.
+      - name: Install CLI with install.ps1
+        if: matrix.arch == 'x64'
+        run: |
+          set -euo pipefail
+          mirror="$RUNNER_TEMP/mirror"
+          mkdir -p "$mirror/v$VERSION"
+          cp release-cli/*.zip "$mirror/v$VERSION/"
+          (cd "$mirror/v$VERSION" && sha256sum t3-*.zip > SHA256SUMS)
+          python -m http.server 8765 --bind 127.0.0.1 --directory "$mirror" > /dev/null 2>&1 &
+          server=$!
+          trap 'kill "$server" || true' EXIT
+          curl -fsS --retry 10 --retry-connrefused --retry-delay 1 "http://127.0.0.1:8765/v$VERSION/SHA256SUMS" > /dev/null
+          T3CODE_RELEASE_BASE_URL=http://127.0.0.1:8765 \
+            T3CODE_VERSION="$VERSION" \
+            T3CODE_HOME="$(cygpath -w "$RUNNER_TEMP/t3-home")" \
+            T3CODE_INSTALL_BIN_DIR="$(cygpath -w "$RUNNER_TEMP/t3-bin")" \
+            powershell -NoProfile -ExecutionPolicy Bypass -File scripts/install.ps1
+          test -f "$RUNNER_TEMP/t3-bin/t3.cmd"
+          "$RUNNER_TEMP/t3-home/runtime/versions/$VERSION/t3.exe" --version | grep -F "$VERSION"
+
+  # On a pull request this assembles and uploads the release as an artifact
+  # instead of publishing it.
   release:
     name: Publish GitHub Release
-    needs: [prepare, linux, darwin_cli]
+    needs: [prepare, linux, darwin_cli, windows_verify]
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     permissions:
       contents: write
     steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ needs.prepare.outputs.ref }}
+          sparse-checkout: |
+            /*
+            !/.repos/
+          sparse-checkout-cone-mode: false
+
+      - name: Setup Vite+
+        uses: voidzero-dev/setup-vp@v1
+        with:
+          node-version-file: package.json
+          cache: true
+          run-install: |
+            args:
+              - --filter=@t3tools/scripts...
+
       - name: Download desktop assets
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
@@ -402,21 +796,48 @@ jobs:
           merge-multiple: true
           path: release-assets
 
+      # Both architectures read latest.yml, which lists both installers.
+      - name: Merge Windows updater manifests
+        run: |
+          set -euo pipefail
+          cd release-assets
+          node ../scripts/merge-update-manifests.ts --platform win latest-win-x64.yml latest-win-arm64.yml latest.yml
+          rm latest-win-x64.yml latest-win-arm64.yml
+          for arch in x64 arm64; do
+            if ! grep -qF "url: T3-Code-${{ needs.prepare.outputs.version }}-$arch.exe" latest.yml; then
+              echo "::error::latest.yml does not list the $arch installer." >&2
+              exit 1
+            fi
+          done
+          cat latest.yml
+
       # Installers verify archives against this file.
       - name: Write CLI archive checksums
         run: |
           set -euo pipefail
           cd release-assets
-          for key in linux-x64 linux-arm64 darwin-arm64; do
-            archive="t3-${{ needs.prepare.outputs.version }}-$key.tar.gz"
+          for archive in \
+            t3-${{ needs.prepare.outputs.version }}-{linux-x64,linux-arm64,darwin-arm64}.tar.gz \
+            t3-${{ needs.prepare.outputs.version }}-{win32-x64,win32-arm64}.zip; do
             [[ -f "$archive" ]] || { echo "Missing $archive" >&2; exit 1; }
           done
-          sha256sum t3-*.tar.gz > SHA256SUMS
+          sha256sum t3-*.tar.gz t3-*.zip > SHA256SUMS
           cat SHA256SUMS
+
+      - name: Upload dry-run release
+        if: github.event_name == 'pull_request'
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: release-dry-run
+          path: release-assets/*
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 3
 
       # Not a prerelease and marked latest: the desktop updater on the stable
       # channel reads GitHub's "latest release".
       - name: Publish release
+        if: github.event_name != 'pull_request'
         uses: softprops/action-gh-release@v3
         with:
           tag_name: ${{ needs.prepare.outputs.tag }}
@@ -430,7 +851,11 @@ jobs:
             release-assets/*.deb
             release-assets/latest-linux.yml
             release-assets/latest-linux-arm64.yml
+            release-assets/*.exe
+            release-assets/*.exe.blockmap
+            release-assets/latest.yml
             release-assets/*.tar.gz
+            release-assets/*.zip
             release-assets/SHA256SUMS
           fail_on_unmatched_files: true
           token: ${{ github.token }}
