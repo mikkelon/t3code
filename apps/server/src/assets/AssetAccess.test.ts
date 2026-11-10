@@ -971,14 +971,20 @@ describe("AssetAccess", () => {
       const separatorIndex = suffix.indexOf("/");
       const token = suffix.slice(0, separatorIndex);
 
-      expect(yield* resolveAsset(token, "report.html")).toEqual({
+      expect(yield* resolveAsset(token, "report.html")).toMatchObject({
         kind: "file",
         path: canonicalHtmlPath,
       });
-      expect(yield* resolveAsset(token, "report.css")).toEqual({
-        kind: "file",
-        path: canonicalCssPath,
-      });
+      const css = yield* resolveAsset(token, "report.css");
+      expect(css).toMatchObject({ kind: "file", path: canonicalCssPath });
+      if (css?.kind !== "file") throw new Error("Expected the sibling stylesheet");
+      const cssResponse = HttpServerResponse.toWeb(yield* assetFileResponse(css));
+      expect(cssResponse.headers.get("cache-control")).toBe("private, no-cache");
+      yield* fileSystem.writeFileString(cssPath, "body { color: blue; }");
+      const editedCss = yield* resolveAsset(token, "report.css");
+      if (editedCss?.kind !== "file") throw new Error("Expected the edited sibling stylesheet");
+      const editedCssResponse = HttpServerResponse.toWeb(yield* assetFileResponse(editedCss));
+      expect(yield* Effect.promise(() => editedCssResponse.text())).toBe("body { color: blue; }");
       for (const extension of ["otf", "ttf", "woff", "woff2"]) {
         const fontName = `preview.${extension}`;
         const fontPath = path.join(root, fontName);
@@ -990,10 +996,8 @@ describe("AssetAccess", () => {
         ]) {
           const url = yield* issueAssetUrl({ resource, workspaceRoot: root });
           const suffix = url.relativeUrl.slice(`${ASSET_ROUTE_PREFIX}/`.length);
-          expect(yield* resolveAsset(suffix.slice(0, suffix.indexOf("/")), fontName)).toEqual({
-            kind: "file",
-            path: canonicalFontPath,
-          });
+          const font = yield* resolveAsset(suffix.slice(0, suffix.indexOf("/")), fontName);
+          expect(font).toMatchObject({ kind: "file", path: canonicalFontPath });
         }
       }
       expect(yield* resolveAsset(token, "../secret.txt")).toBeNull();
