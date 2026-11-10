@@ -15,7 +15,13 @@ curl -fsSL https://raw.githubusercontent.com/mikkelon/t3code/main/scripts/instal
 ```
 
 This installs this fork's newest release for Linux (x64, arm64) or an Apple
-Silicon Mac. The fork publishes no Windows `t3`.
+Silicon Mac. On Windows (x64, arm64), run this in PowerShell instead:
+
+```powershell
+irm https://raw.githubusercontent.com/mikkelon/t3code/main/scripts/install.ps1 | iex
+```
+
+It puts `t3.exe` under `~\.t3\runtime` and a `t3` command in `~\.local\bin`.
 
 This installs the `t3` binary to `~/.local/bin`. If your shell reports `command not found`
 afterwards, that directory is not on your `PATH` yet; the installer prints the
@@ -82,8 +88,15 @@ To install by hand, download the AppImage or `.deb` from
 [GitHub Releases](https://github.com/mikkelon/t3code/releases/latest). Make the
 AppImage executable (`chmod +x T3-Code-*.AppImage`) and run it; on Debian and
 Ubuntu, install the `.deb` with `sudo apt install ./T3-Code-*.deb`. The winget,
-Homebrew, AUR and Nix packages install upstream T3 Code, not this fork. This fork publishes no macOS or Windows desktop builds; see
+Homebrew, AUR and Nix packages install upstream T3 Code, not this fork. This fork publishes no macOS desktop build; see
 [Desktop artifacts](../operations/development.md#desktop-artifacts) to build one.
+
+On Windows, download `T3-Code-<version>-x64.exe` (or `-arm64.exe` for Windows
+on ARM) from [GitHub Releases](https://github.com/mikkelon/t3code/releases/latest)
+and run it. It installs for your user only. The installer is unsigned, so
+SmartScreen warns the first time: choose **More info**, then **Run anyway**. The
+app updates itself from this fork's releases. Windows has no background service,
+so agents run inside the app and stop when you quit it.
 
 Both Linux builds update themselves from this fork's releases. The `.deb` asks
 for your password to install each update. If your desktop has no password
